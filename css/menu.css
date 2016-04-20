@@ -1,0 +1,82 @@
+ul.menu {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	font-size: 100%;
+	font: inherit;
+	vertical-align: baseline;
+  z-index: 3000;
+	list-style: none;
+	cursor:pointer;
+}
+
+ul.menu UL {
+  padding: 0px;
+	list-style: none;
+}
+
+ul.menu LI {
+  padding: 3px 5px;
+  padding-top: 0px;
+  position: relative;
+	float: left;
+}
+
+ul.menu A {
+  color: #ddd;
+  text-decoration:none;
+}
+
+/* Menu color */
+ul.menu LI {
+  background-color: gray;
+	color:#999;
+}
+
+ul.menu LI:hover {
+  background-color: black;
+  color:white;
+}
+
+/* 2nd level */
+
+ul.menu LI UL LI {
+  float: none;
+  width: 150px;  /* submenu width */
+}
+
+ul.menu LI UL {
+  position: absolute;
+  top: 28px;  /* submenu positioning */
+  left: -999em;  /* hide */
+  z-index: 3001;
+}
+
+ul.menu LI:hover UL {
+  left: 0px;  /* show */
+}
+
+/*A over whole menu */
+ul.menu LI UL A {
+  display:block;
+  width: 150px;
+  height: 28px;
+}
+
+/* decorator */
+ul.menu LI UL {
+  border: 1px solid black;
+  box-shadow:3px 3px 3px 0px rgba(0,0,0,0.3);
+}
+
+/* 3rd level */
+ul.menu LI UL LI UL {
+	top: 5px;
+	margin-left: 150px;
+	display: none;
+	z-index: 3100;
+}
+
+ul.menu LI UL LI:hover UL {
+	display: block;
+}

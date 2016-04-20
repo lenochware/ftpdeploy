@@ -1,0 +1,166 @@
+/* SITE GLOBAL */
+
+BODY {
+  margin: 0;
+  padding: 0;
+  font-family:  Verdana, Arial; font-size: 12px;
+  background-color: white;
+}
+
+DIV#site-top{
+  width:100%;
+  height:100px;
+  border-bottom: 3px solid orange;
+  color:white;
+  /*background: linear-gradient(45deg, #699 25%,
+    #599 25%, #599 50%, 
+    #699 50%, #699 75%, 
+    #599 75%);
+  background-size:20px 20px;*/
+
+  background: linear-gradient(90deg, #699 20%, #299 80%);
+
+}
+
+DIV#menu {
+ width:100%;
+ height:28px;
+ padding: 0px;
+ padding-left: 5px;
+ margin: 0px;
+ background-color:gray;
+ line-height: 25px;
+}
+
+DIV#site-content {
+  min-height: 600px;
+  padding: 10px 20px;
+}
+
+DIV#site-top H1 {
+  display: inline-block;
+  color: white;
+  font-family: tahoma, serif;
+  font-size: 22pt;
+  padding: 0px;
+  margin: 10px;
+  font-weight:100;
+  text-shadow: 0 0 5px rgba(0,0,0,0.5);
+}
+
+#font-logo {
+color:white;
+font-size:60px;
+}
+
+DIV#site-top A {
+  color: #fa0;
+}
+
+DIV.void {}
+DIV.hidden { display:none; }
+
+@media print {
+  DIV#site-top  { display: none; }
+  DIV#menu  { display: none; }
+}
+
+img { border-width: 0px }
+img.bullet { vertical-align: middle; position:relative; top:-1px; }
+img.link { cursor:pointer }
+
+
+/* RAMECKY */
+
+.warning, .error {
+  width: 500px;
+  background-color: #ff9;
+  border: 1px solid red;
+  padding: 10px;
+}
+
+.message {
+  width: 500px;
+  background-color: #eef;
+  border: 1px solid #00f;
+  padding: 10px;
+}
+
+
+/* PREHLEDY */
+
+TABLE.grid {
+border-collapse: collapse;
+empty-cells: show;
+width: 100%;
+}
+
+TABLE.grid TR:first-child {
+  border: 1px solid rgb(180,180,150);
+}
+
+TABLE.grid TH {
+  background-color: rgb(247,243,221);
+  background: -moz-linear-gradient(top, rgb(255,250,229), rgb(234,232,209));
+  background: -webkit-linear-gradient(top, rgb(255,250,229), rgb(234,232,209));
+  background: linear-gradient(top, rgb(255,250,229), rgb(234,232,209));
+  text-align: left;
+  padding: 4px 2px;
+  text-shadow: 0px 1px 0px rgba(255, 255, 255, 0.7);
+}
+
+TABLE.grid TD {
+  border-bottom: 1px dotted #ccd;
+  height: 20px;
+  text-shadow: 0px 1px 0px rgba(255, 255, 255, 0.7);
+}
+
+TABLE.grid TR.link {
+  cursor: pointer;
+}
+
+TABLE.grid TR:hover {
+  background-color: #fff3f0;
+}
+
+TABLE.strips tr:nth-child(even) {
+  background-color: #f0f0ff;
+}
+
+TABLE.grid.strips TR:hover {
+  background-color: #fff3f0;
+}
+
+DIV.pager {
+  padding: 4px 2px;
+  margin-top: 8px;
+}
+
+/* FORM */
+
+table.form {
+  border: 1px solid gray;
+  border-radius: 2px;
+  box-shadow:1px 1px 1px 0px #eee;
+  background-color: rgb(234,232,209);
+  padding: 5px;
+  margin: 5px 0px;
+  text-shadow: 0px 1px 0px rgba(255, 255, 255, 0.7);
+}
+
+form h1 {
+ padding: 0px;
+ margin: 0px;
+ font-size: 18px;
+}
+
+input.button {
+  cursor: pointer;
+}
+
+label.required:before {
+  content: "(*) ";
+  color:red;
+}
+
+.inline div {float:left}
