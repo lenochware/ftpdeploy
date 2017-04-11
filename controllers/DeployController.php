@@ -26,7 +26,7 @@ function initAction($task)
 {
   $this->logger = new TextLogger($task);
 
-  $task = sanitize($task, 'alphanum');
+  $task = sanitize($task, 'file-id');
 
   $config = include('config/'.$task.'.php');
   $fs = new FileSync;
@@ -60,7 +60,7 @@ function previewAction($task)
 {
   include PCLIB_DIR.'extensions/GridForm.php';
 
-  $task = sanitize($task, 'alphanum');
+  $task = sanitize($task, 'file-id');
   if (!file_exists('data/'.$task.'.md5')) {
     $this->app->redirect('deploy/init/task:'.$task);
   }
@@ -95,7 +95,7 @@ function commitAction($task)
   $this->logger = new TextLogger($task);
 
   $data = $_POST['data'];
-  $task = sanitize($task, 'alphanum');
+  $task = sanitize($task, 'file-id');
   $config = include('config/'.$task.'.php');
   if ($config['password'] != $data['PASSWORD']) {
     $this->app->error('Chybné heslo.');
