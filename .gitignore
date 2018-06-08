@@ -1,1 +1,5 @@
 *.bak
+data/*
+!data/.gitkeep
+config/*
+!config/example.php
