@@ -18,7 +18,7 @@ function indexAction() {
 
 function historyAction($task)
 {
-  return '<pre>'.@file_get_contents('data/log/'.$task.'.log').'</pre>';
+  return '<pre>'.@file_get_contents('./data/log/'.$task.'.log').'</pre>';
 }
 
 /** Run if no deploy has been done yet - add files to monitoring. */
@@ -28,19 +28,19 @@ function initAction($task)
 
   $task = sanitize($task, 'file-id');
 
-  $config = include('config/'.$task.'.php');
+  $config = include('./config/'.$task.'.php');
   $fs = new FileSync;
   $files = $fs->getList($config['local'], $config);  
   $hashes = $this->createHashArray($files);
 
   if ($_POST['save']) {
-    file_put_contents('data/'.$task.'.md5', json_encode($hashes));
+    file_put_contents('./data/'.$task.'.md5', json_encode($hashes));
     $this->app->message('Soubory byly přidány.');
     $this->logger->log('Init '.now()." Úloha inicializována.\n");
     $this->app->redirect('deploy/preview/task:'.$task);
   }
   elseif($_POST['no_save']) {
-    file_put_contents('data/'.$task.'.md5', json_encode(array()));
+    file_put_contents('./data/'.$task.'.md5', json_encode(array()));
     $this->logger->log('Init '.now()." Úloha inicializována.\n");
     $this->app->redirect('deploy/preview/task:'.$task);    
   }
@@ -232,13 +232,13 @@ protected function getDiff($sourceDir, $savedHashes, $hashes)
 
 protected function loadHashFile($task)
 {
-  $hashFile = 'data/'.$task.'.md5';
+  $hashFile = './data/'.$task.'.md5';
   return file_exists($hashFile)? json_decode(file_get_contents($hashFile), true) : array();
 }
 
 protected function saveHashFile($task, $hashes)
 {
-  file_put_contents('data/'.$task.'.md5', json_encode($hashes));  
+  file_put_contents('./data/'.$task.'.md5', json_encode($hashes));  
 }
 
 protected function createHashArray($files)
@@ -259,7 +259,7 @@ protected function createHashArray($files)
 protected function getTasks()
 {
   $tasks = array();
-  foreach(glob('config/*') as $fileName) {
+  foreach(glob('./config/*') as $fileName) {
     $tasks[]['TASK'] = extractPath($fileName, "%f");
   }
 
