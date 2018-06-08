@@ -101,12 +101,7 @@ function commitAction($task)
     $this->app->error('Chybné heslo.');
   }
 
-  if ($data['COMMENT']) {
-    $this->logger->log('Deploy '.now().' '.$data['COMMENT']);
-  }
-  else {
-    $this->app->error('Zadejte komentář.');
-  }
+  $this->logger->log('Deploy '.now().' '.$data['COMMENT']);
 
   list($modified, $deleted, $unwatch) = $this->prepareData($config, $_POST['rowdata']);
 
