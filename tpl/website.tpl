@@ -1,6 +1,6 @@
 <?elements
 string LAST_LOGIN date
-head HEAD scripts "css/site.css,css/menu.css,js/jquery.js,libs/pclib/assets/pclib.js"
+head HEAD scripts "css/site.css,css/menu.css,js/jquery.js,libs/pclib/assets/pclib.js,js/global.js"
 messages PRECONTENT
 ?>
 <!doctype html>
