@@ -1,6 +1,7 @@
 <?php
 include 'libs/FileSync.php';
 include 'libs/TextLogger.php';
+include 'libs/class.Diff.php';
 
 class DeployController extends App_Controller {
 
@@ -264,6 +265,26 @@ protected function getTasks()
   }
 
   return $tasks;
+}
+
+/**
+ * Return diff html content
+ * @param string $file
+ * @param string $repository
+ * @return string
+ * @throws Exception
+ */
+public function diffAction($file, $repository)
+{  
+  $config = include './config/' . $repository . '.php';
+
+  $to_file = file_get_contents($config['local'] . '/' . $file);
+
+  $fs = new FileSync;
+  $fs->connect($config['remote']);
+  $from_file = $fs->getFile($file);
+
+  return '<h2>' . $file . '</h2><hr>' . Diff::toTable(Diff::compare($from_file, $to_file));
 }
 
 }

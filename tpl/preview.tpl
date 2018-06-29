@@ -21,17 +21,17 @@ button commit lb " Publikovat" tag "button" glyph "fa fa-flag"
 	}
 </style>
 <h2>{GET.task}: Přehled změn</h2>
-<table class="grid">
-<tr>
-	<th width="30"></th>
+<table id="file-list" class="grid">
+<tr class="hdr">
+	<th width="30"><input type="checkbox" id="check-all" checked="checked" value="1"></th>
 	<th>Soubor</th>
 	<th>Stav</th>
 	<th></th>
 </tr>
 {block items}
   <tr class="selected link no-text-select">
-  	<td><input type="checkbox" name="rowdata[][FILE]" checked="checked" value="{FILENAME} {STATUS}" onclick="this.checked = !this.checked;"></td>
-  	<td>{FILENAME}</td>
+  	<td><input type="checkbox" name="rowdata[][FILE]" checked="checked" class="send-file" value="{FILENAME} {STATUS}" onclick="this.checked = !this.checked;"></td>
+	  <td class="filename" onclick="template_form_load_diff('{FILENAME}', '{GET.task}')">{FILENAME}</td>
   	<td><span class="{STATUS}">{STATUS_TEXT}</span></td>
   	<td align="right"></td>
   </tr>
@@ -40,7 +40,9 @@ button commit lb " Publikovat" tag "button" glyph "fa fa-flag"
   	<td colspan="4">Nenalezeny žádné změny.</td>
   </tr>
 {/block}
-</table><br>
+</table>
+<br>
+
 Celkem {TOTAL} souborů.
 
 <br>
@@ -65,7 +67,7 @@ Celkem {TOTAL} souborů.
 	<td>{commit}</td>
 	<td></td>
 </tr>
-</table>	
+</table>
 <script language="JavaScript">
 
 var selected = false;
@@ -86,8 +88,9 @@ function setSelected(tr)
 
 function init()
 {
-	$("table.grid tr")
-		//.click(toggleSelected)
+	$("#check-all").change(changeCheckboxes);
+
+	$("table.grid tr").not(".hdr")
 		.mouseup(function() { selecting = false; })
 		.mousedown(function() { 
 			selecting = true; 
@@ -96,5 +99,6 @@ function init()
 		})
 		.mousemove(function() { if (selecting) setSelected(this); } );
 }
+
 $(document).ready(init);
 </script>

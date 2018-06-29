@@ -176,6 +176,11 @@ class FileSync
 		return call_user_func($this->$name, $this, $params);
 	}
 
+  function getFile($filePath)
+  {
+      return $this->remote->getFile($filePath);
+  }
+
 } //FileSync
 
 /**
@@ -244,6 +249,18 @@ class FtpDriver
 	public function isDir($directory) {
 		return @ftp_chdir($this->connection, $this->rootDir.'/'.$directory);
 	}
+
+   
+  public function getFile($filePath)
+  {
+      @ftp_chdir($this->connection, $this->rootDir);
+      ob_start();
+      $result = @ftp_get($this->connection, 'php://output', $this->rootDir.'/'.$filePath, FTP_BINARY);
+      $data = ob_get_contents();
+      ob_end_clean();
+      return $data;
+  }
+
 
 } //FtpDriver
 
