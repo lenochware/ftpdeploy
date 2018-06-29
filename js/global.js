@@ -14,9 +14,3 @@ function modal_close() {
     $("#modal1").remove();
     $("#overlay").remove();
 }
-
-function changeCheckboxes()
-{
-    $(".send-file").prop('checked', $(this).prop('checked'));
-    $("#file-list tr").toggleClass("selected", $(this).prop('checked'));
-}

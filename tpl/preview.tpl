@@ -30,7 +30,7 @@ button commit lb " Publikovat" tag "button" glyph "fa fa-flag"
 </tr>
 {block items}
   <tr class="selected link no-text-select">
-  	<td><input type="checkbox" name="rowdata[][FILE]" checked="checked" class="send-file" value="{FILENAME} {STATUS}" onclick="this.checked = !this.checked;"></td>
+  	<td><input type="checkbox" name="rowdata[][FILE]" checked="checked" class="send-file" value="{FILENAME} {STATUS}"></td>
 	  <td class="filename" onclick="template_form_load_diff('{FILENAME}', '{GET.task}')">{FILENAME}</td>
   	<td><span class="{STATUS}">{STATUS_TEXT}</span></td>
   	<td align="right"></td>
@@ -70,34 +70,33 @@ Celkem {TOTAL} souborů.
 </table>
 <script language="JavaScript">
 
-var selected = false;
-var selecting = false;
+// var selected = false;
+// var selecting = false;
 
-function toggleSelected()
-{
-	selected = !$(this).hasClass('selected');
-	setSelected(this);
-}
+// function toggleSelected()
+// {
+// 	selected = !$(this).hasClass('selected');
+// 	setSelected(this);
+// }
 
-function setSelected(tr)
-{
-	var checkbox = $(tr).find(':checkbox').get(0);
-	checkbox.checked = selected;
-	$(tr).toggleClass('selected', selected);
-}
+// function setSelected(tr)
+// {
+// 	var checkbox = $(tr).find(':checkbox').get(0);
+// 	checkbox.checked = selected;
+// 	$(tr).toggleClass('selected', selected);
+// }
 
 function init()
 {
-	$("#check-all").change(changeCheckboxes);
+	$("#check-all").change(function() {
+    $(".send-file").prop('checked', $(this).prop('checked'));
+    $("#file-list tr").toggleClass("selected", $(this).prop('checked'));
+	});
 
-	$("table.grid tr").not(".hdr")
-		.mouseup(function() { selecting = false; })
-		.mousedown(function() { 
-			selecting = true; 
-			selected = !$(this).hasClass('selected');
-			setSelected(this);
-		})
-		.mousemove(function() { if (selecting) setSelected(this); } );
+  $(".send-file").change(function() {
+      $(this).closest('tr').toggleClass("selected", $(this).prop('checked'));
+  });
+
 }
 
 $(document).ready(init);
