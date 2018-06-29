@@ -278,7 +278,8 @@ public function diffAction($file, $repository)
 {  
   $config = include './config/' . $repository . '.php';
 
-  $to_file = file_get_contents($config['local'] . '/' . $file);
+  $tofileName = $config['local'] . '/' . $file;
+  $to_file = file_exists($tofileName)? file_get_contents($tofileName) : '';
 
   $fs = new FileSync;
   $fs->connect($config['remote']);
