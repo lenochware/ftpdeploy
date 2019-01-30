@@ -15,7 +15,7 @@
 /**
  * PClib version string
  */
-define('PCLIB_VERSION', '1.9.10');
+define('PCLIB_VERSION', '2.3.2');
 
 /* Find out where library reside. MUST BE an absolute path. */
 if (!defined('PCLIB_DIR')) {
@@ -28,6 +28,7 @@ if (!defined('BASE_URL')) {
 		rtrim(dirname($_SERVER['PHP_SELF']),"/\\").'/');
 }
 
+require_once PCLIB_DIR . 'system/exceptions.php';
 require_once PCLIB_DIR . 'Func.php';
 require_once PCLIB_DIR . 'system/Autoloader.php';
 
@@ -44,33 +45,49 @@ class Pclib
 	/** var Autoloader */
 	public $autoloader;
 
+	public $legacyAliases = array(
+		'App' => '\pclib\App',
+		'Db' => '\pclib\Db',
+		'Tpl' => '\pclib\Tpl',
+		'Grid' => '\pclib\Grid',
+		'Form' => '\pclib\Form',
+		'Auth' => '\pclib\Auth',
+		'Tree' => '\pclib\Tree',
+		'Logger' => '\pclib\Logger',
+		'Translator' => '\pclib\Translator',
+		'App_Controller' => '\pclib\Controller',		
+	);
+
 	/** PClib intialization - it's called just once before using %pclib. */
 	function init()
 	{
-		$classes = array(
-			'ErrorHandler' => PCLIB_DIR.'/system/ErrorHandler.php',
-			'BaseObject' => PCLIB_DIR.'/system/BaseObject.php',
-
-			//for backward compatibility (lcase class names)
-			'app' => PCLIB_DIR.'/App.php',
-			'db' => PCLIB_DIR.'/Db.php',
-			'tpl' => PCLIB_DIR.'/Tpl.php',
-			'grid' => PCLIB_DIR.'/Grid.php',
-			'form' => PCLIB_DIR.'/Form.php',
-			'tree' => PCLIB_DIR.'/Tree.php',
-			'auth' => PCLIB_DIR.'/Auth.php',
-			'logger' => PCLIB_DIR.'/Logger.php',
-			'translator' => PCLIB_DIR.'/Translator.php',
-			'app_controller' => PCLIB_DIR.'/App_Controller.php',
+		$aliases = array(
+			'PCApp' => '\pclib\App',
+			'PCDb' => '\pclib\Db',
+			'PCTpl' => '\pclib\Tpl',
+			'PCGrid' => '\pclib\Grid',
+			'PCForm' => '\pclib\Form',
+			'PCAuth' => '\pclib\Auth',
+			'PCTree' => '\pclib\Tree',
+			'PCLogger' => '\pclib\Logger',
+			'PCTranslator' => '\pclib\Translator',
+			'PCController' => '\pclib\Controller',
+			'PCModel' => '\pclib\orm\Model',
+			'PCValidator' => '\pclib\Validator',
+			'PCSelection' => '\pclib\orm\Selection',
+			'PCFileStorage' => '\pclib\FileStorage',
 		);
 
-		$this->version = PCLIB_VERSION;
-		$this->autoloader = new Autoloader;
-		$this->autoloader->addDirectory(PCLIB_DIR);
-		$this->autoloader->addClasses($classes);
-		$this->autoloader->register();
+		$this->legacyAliases += array_change_key_case($this->legacyAliases, CASE_LOWER);
 
-		ini_set('docref_root', 'http://cz.php.net/manual/en/');
+		$this->version = PCLIB_VERSION;
+		$autoload = new \pclib\system\Autoloader;
+		$autoload->addDirectory(PCLIB_DIR, array('namespace' => 'pclib'));
+		$autoload->addAliases($aliases);
+		$autoload->register();
+		$this->autoloader = $autoload;
+
+		ini_set('docref_root', 'http://php.net/');
 
 		//%form button hack
 		if (is_array($_REQUEST['pcl_form_submit'])) {
@@ -79,24 +96,6 @@ class Pclib
 		}
 	}
 } //class pclib
-
-//Application service
-interface IService {}
-
-//Exceptions
-class NotImplementedException extends Exception {}
-class DatabaseException extends Exception {}
-class AuthException extends Exception {}
-class NoValueException extends Exception {}
-class IOException extends Exception {}
-class MemberAccessException extends Exception {}
-class FileNotFoundException extends IOException {}
-class NoDatabaseException extends NoValueException {
-	public function __construct($message = '', $code = 0/*, Exception $previous = null*/) {
-		if (!$message) $message = 'Database connection required.';
-		parent::__construct($message, $code/*, $previous*/);
-	}
-}
 
 global $pclib;
 $pclib = new Pclib();

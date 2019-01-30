@@ -12,6 +12,10 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
+namespace pclib;
+use pclib;
+use pclib\system\TplParser;
+
 /**
  * Template engine. Load template, populate it with values and display it.
  * Template is usually html file with template tags {TAGNAME}.
@@ -24,7 +28,7 @@
  *
  * See \ref tpl-tags for description of implemented tags.
  */
-class Tpl extends BaseObject
+class Tpl extends system\BaseObject
 {
 
 /** Occurs on template initialization. */
@@ -48,9 +52,6 @@ public $elements = array();
 /** Array of template values. */
 public $values = array();
 
-/* List of fields written into template if {tpl.fields} or {tpl.control} tag is used. */
-protected $fields = array();
-
 /**
  *  Name of the session variable where template values are stored.
  *  @see loadSession(), saveSession()
@@ -66,6 +67,9 @@ public $db;
 /** var Translator */
 public $translator;
 
+/** var Router */
+public $router;
+
 /** Generate XHTML code. */
 public $useXhtml = false;
 
@@ -80,6 +84,9 @@ protected $header = array();
 
 /** Document array - It contains parsed template. */
 protected $document;
+
+/** var TplParser */
+protected $parser;
 
 private $inBlock = array();
 
@@ -103,6 +110,8 @@ function __construct($path = '', $sessName = '')
 	$this->app = $pclib->app;
 	$this->config = $this->app->config;
 	$this->escapeHtmlFunction = array($this, 'escapeHtml');
+	$this->parser = new TplParser;
+	$this->parser->legacyBlockSyntax = $this->config['pclib.compatibility']['tpl_syntax'];
 
 	$this->sessName = $sessName;
 	$this->loadSession();
@@ -163,8 +172,8 @@ protected function hasType($name)
 function load($path)
 {
 	if (!file_exists($path)) throw new FileNotFoundException("File '$path' not found.");
-	$tpl_string = file_get_contents ($path);
-	$this->loadString ($tpl_string);
+	$tpl_string = file_get_contents($path);
+	$this->loadString($tpl_string);
 	$this->onLoad($path);
 }
 
@@ -175,23 +184,9 @@ function load($path)
  */
 function loadString($s)
 {
-	$tag_start = '<?elements';
-	$tag_end = '?'.'>';
-
-	$start = strpos($s, $tag_start);
-	$end = strpos($s, $tag_end);
-	if ($start === false or $end === false or $end < $start) {
-		$template_def = $s;
-	}
-	else {
-		$elements_def = substr($s, $start + strlen($tag_start), $end-$start-strlen($tag_start));
-		$this->parseElements($elements_def);
-		$template_def = trim(substr($s, $end-$start+strlen($tag_end)),"\r\n");
-	}
-
-	$this->parseTemplate($template_def);
-
-	return true;
+	$templ = $this->parser->parse($s);	
+	$this->elements = $templ[0];
+	$this->document = $templ[1];
 }
 
 protected function _out($block = null)
@@ -210,7 +205,7 @@ protected function _out($block = null)
 function out($block = null)
 {
 	$this->onBeforeOut();
-	$this->_out();
+	$this->_out($block);
 	$this->onAfterOut();
 }
 
@@ -222,7 +217,7 @@ function html($block = null)
 {
 	ob_start();
 	$this->out($block);
-	$html_code = ob_get_contents ();
+	$html_code = ob_get_contents();
 	ob_end_clean();
 	return $html_code;
 }
@@ -253,6 +248,18 @@ function enable()
 	foreach($args as $name) {
 		if ($name) $this->elements[$name]['noprint'] = $val;
 	}
+}
+
+/**
+ * Disable (hide) tag or block $name.
+ *
+ * @param array|list of tag names
+ */
+function disable()
+{
+	$args = func_get_args();
+	if (is_array($args[0])) $args = $args[0];
+	$this->enable($args, false);
 }
 
 /**
@@ -336,16 +343,56 @@ function getBlock($block)
 **/
 function getValue($id)
 {
+	if (strpos($id, '_tvar_') === 0) {
+		return $this->getVariable($id);
+	}
+
 	$elem = $this->elements[$id];
 	if ($elem['loop']) return $this->compute($id);
 	if ($elem['field']) $id = $elem['field'];
+	
 	foreach ($this->inBlock as &$block) {
 		$rowno = $this->elements[$block]['rowno'];
 		$value = isset($rowno)? $this->values[$block][$rowno][$id] : $this->values[$block][$id];
 		if (isset($value)) break;
 	}
+
 	if (!isset($value)) $value = $this->values[$id];
 	return (is_numeric($value) or $value)? $value : $elem['default'];
+}
+
+/** Get template variable _tvar_... */
+protected function getVariable($id)
+{
+	$bid = $this->inBlock[0];
+	$b = $this->elements[$bid];
+
+	$parts = explode('_', $id, 4);
+
+	if (in_array($parts[2], array('get', 'post', 'cookie', 'session'))) {
+		$value = $this->getHttpVariable($parts[2], $parts[3]);
+	}
+	else {
+		switch ($id) {
+			case '_tvar_baseurl': $value = BASE_URL; break;
+			case '_tvar_rowno': $value = $this->getRowNo(); break;
+			case '_tvar_count': $value = count($this->values[$bid]); break;
+			case '_tvar_top': $value = ($b['rowno'] == 0)? '1':'0'; break;
+			case '_tvar_bottom': $value = ($b['rowno'] == count($this->values[$bid]) - 1)? '1':'0'; break;
+		}	
+	}
+	
+	return $this->escapeHtmlFunction($value);
+}
+
+protected function getHttpVariable($method, $id)
+{
+	switch ($method) {
+		case 'get': return $_GET[$id];
+		case 'post': return $_POST[$id];
+		case 'session': return $_SESSION[$id];
+		case 'cookie': return $_COOKIE[$id];
+	}
 }
 
 /** Return row number of the current block. */
@@ -377,51 +424,23 @@ function deleteSession()
 	$this->app->deleteSession($this->sessName);
 }
 
-/** Try return array of fieldnames from query/table/elements */
-protected function getFields($dsstr = null)
+/**
+ * Use default template for displaying database table content.
+ */
+protected function createFromTable($tableName, $templatePath)
 {
-	if ($this->fields) return $this->fields;
-	if ($dsstr) return array_filter(array_keys((array)$this->service('db')->select($dsstr)),'is_string');
-	return array_keys($this->elements);
+	$columns = $this->service('db')->columns($tableName);
+	$s = extensions\TemplateFactory::getTemplate($templatePath, $columns);
+	$this->loadString($s);
+	$this->init();
 }
 
 /**
- * Build default template from file assets/def_*.tpl and uses it.
- * Show values in simple table layout. Generated template is based on database table.
- * Ex: $form->create('select * from Orders');
- * @param string $dsstr Datasource string ( see db->select() )
- * @param string $fileName If present, it will save generated template as $filename for future use
- * @param string $template If present, used instead of 'assets/def_*.tpl' as template generator
-**/
-function create($dsstr, $fileName = null, $template = null)
+ * Use default template for displaying database table content.
+ */
+function create($tableName)
 {
-	$trans = array('<:' => '<', ':>' => '>', '{:' => '{', ':}' => '}');
-	if (!$template) $template = PCLIB_DIR.'assets/def_tpl.tpl';
-
-	$fields = $this->getFields($dsstr);
-	foreach($fields as $id) {
-		$elem .= "string $id lb \"$id\"\n";
-		$body[] = array(
-		'LABEL' => '{'.$id.'.lb}',
-		'FIELD' => '{'.$id.'}',
-		);
-	}
-
-	$t = new Tpl($template);
-	$t->values['NAME'] = $this->service('db')->tableName($dsstr);
-	$t->values['BODY'] = $body;
-	$t->values['ELEMENTS'] = trim($elem);
-	$html = strtr($t->html(), $trans);
-
-	if ($fileName) {
-		$ok = file_put_contents($fileName, $html);
-		if (!$ok) throw new IOException("Cannot write file $fileName.");
-		else @chmod($fileName, 0666);
-	}
-	else {
-		$this->loadString($html);
-		$this->init();
-	}
+	$this->createFromTable($tableName, PCLIB_DIR.'assets/default-tpl.tpl');
 }
 
 /** Return computed value of element $id. */
@@ -444,16 +463,21 @@ function compute($id)
 function print_Element($id, $sub, $value)
 {
 	$elem = $this->elements[$id];
-	if ($sub == 'lb') {
-		print $elem['lb']? $elem['lb'] : $id;
-		return;
-	}
-	elseif ($sub == 'value') {
-		print $value;
-		return;
-	}
 
-	if ($this->config['pclib.tpl.escape'] and !$elem["noescape"] and is_string($value)) {
+  if ($sub == 'lb') {
+    print $elem['lb']? $elem['lb'] : $id;
+    return;
+  }
+  elseif ($sub == 'value') {
+    print $value;
+    return;
+  }
+
+	if (
+		($elem['escape'] 
+			or ($this->config['pclib.security']['tpl-escape'] and !$elem["noescape"])
+		) and is_string($value)
+	) {
 		$value = $this->escapeHtmlFunction($value);
 	}
 
@@ -477,7 +501,8 @@ function print_Element($id, $sub, $value)
 			$this->print_Class($id,$sub,null);
 			break;
 		case 'include':
-			$this->print_Include($id,$sub,null);
+		case 'action':
+			$this->print_Action($id,$sub,null);
 			break;
 
 		default:
@@ -578,8 +603,13 @@ function print_Link($id, $sub, $value)
 	if ($sub == 'js') {
 		if ($elem['popup'])
 			$js = $this->getPopup($id, $elem['popup'], $url);
-		else
-			$js = "window.location='$url';";
+		else {
+			$js = "window.location='$url'";
+			if ($elem['hash']) {
+				$js .= "+(document.location.hash || '');";
+			}
+		}
+
 		print $js;
 		return;
 	}
@@ -605,8 +635,13 @@ function print_Link($id, $sub, $value)
 	elseif (!$lb)
 		$lb = (string)$value;
 
-	$tag = array('href' => $url, '__attr' => $elem['attr']);
-	if ($elem['html']) $tag += $elem['html'];
+	$tag = array('href' => $url, 'class' => $id, '__attr' => $elem['attr']);
+
+	if ($elem['confirm']) {
+		$tag['onclick'] = "return confirm('".$elem['confirm']."')";
+	}
+
+	if ($elem['html']) $tag = array_merge($tag, $elem['html']);
 	print $this->htmlTag('a', $tag, $lb);
 }
 
@@ -629,44 +664,29 @@ function print_Env($id, $sub, $value)
  */
 function print_Class($id, $sub, $value)
 {
+	if ($id != $this->className) return;
+	$this->eachPrintable(array($this, 'trPrintElement'), $sub);
+}
+
+function eachPrintable($callback, $sub = '')
+{
 	$ignore_list = array('class','block','pager','sort','button');
 
-	if ($id != $this->className) return;
-
-	$fields = $this->getFields();
-	foreach($fields as $id) {
-		$elem = $this->elements[$id];
+	foreach($this->elements as $id => $elem) {
 		if ($elem['noprint'] or $elem['skip'] or in_array($elem['type'], $ignore_list)) continue;
-		$this->print_Class_Item($id, $sub);
+		$elem['sub'] = $sub;
+		call_user_func($callback, $elem);
 	}
 }
 
 /**
- * Call controller's method and include result into template.
- * Example: include comments route "comments/list/id:{id}" will call method
- * Comments_Controller::list_action($id)
- * @copydoc tag-handler
- */
-function print_Include($id, $sub, $value)
-{
-	$rs = $this->replaceParams($this->elements[$id]['route']);
-	$ra = $this->app->splitRoute($rs);
-	$route = $ra['route'];
-	$ct = $this->app->getController($route[0]);
-	if (!$ct) {print "Page $route[0] not found.";}
-	else $html = $ct->run($route[1], $ra['params']);
-	if ($errors = $ct->result['errors'])
-		print implode('<br>', $errors);
-	else print $html;
-}
-
-/**
-	* Implements {tpl.fields} placeholder.
+	* Print element in table layout.
 	* @see print_class();
-	* @copydoc tag-handler
 	*/
-protected function print_Class_Item($id, $sub)
+protected function trPrintElement($elem)
 {
+	$id = $elem['id'];
+
 	print "<tr><td class=\"$id\">";
 	$this->print_Element($id, 'lb', null);
 	print '</td><td>';
@@ -674,6 +694,25 @@ protected function print_Class_Item($id, $sub)
 	if (!$this->fireEventElem('onprint', $id, '', $value))
 		$this->print_Element($id, '', $value);
 	print '</td></tr>';
+}
+
+/**
+ * Call controller's method and include result into template.
+ * Example: action comments route "comments/list/id:{id}" will call method
+ * CommentsController::listAction($id)
+ * @copydoc tag-handler
+ */
+function print_Action($id, $sub, $value)
+{
+	if (!isset($this->elements[$id]['route'])) return;
+	
+	$rs = $this->replaceParams($this->elements[$id]['route']);
+	$action = new Action($rs);
+	$ct = $this->app->newController($action->controller);
+	if (!$ct) {
+		printf($this->t('Page not found: "%s"'), $action->controller);
+	}
+	else print $ct->run($action);
 }
 
 /**
@@ -736,7 +775,7 @@ protected function print_BlockRow($block, $rowno = null)
 	for ($i = $begin; $i < $end; $i++) {
 		$strip = $this->document[$i];
 
-		if ($strip == TPL_ELEM) {
+		if ($strip == TplParser::TPL_ELEM) {
 			 $strip = $this->document[++$i];
 			 list($id,$sub) = explode('.', $strip);
 
@@ -750,9 +789,9 @@ protected function print_BlockRow($block, $rowno = null)
 			 if (!$this->fireEventElem('onprint',$id,$sub,$value))
 				 $this->print_Element($id, $sub, $value);
 		}
-		elseif ($strip == TPL_BLOCK) {
+		elseif ($strip == TplParser::TPL_BLOCK) {
 			$subblock = $this->document[++$i];
-			if (!$this->elements[$subblock]) throw new Exception('Template broken.');
+			if (!$this->elements[$subblock]) throw new \pclib\Exception('Template broken.');
 			if (!$this->elements[$subblock]['noprint']) $this->print_Block($subblock);
 			$i = $this->elements[$subblock]['end'] + 1;
 		}
@@ -808,7 +847,7 @@ protected function getUrl($elem)
 
 	if ($elem['route']) {
 		$rs = $this->replaceParams($elem['route']);
-		return $this->app->getUrl($rs);
+		return $this->service('router')->createUrl($rs);
 	}
 
 	return false;
@@ -818,151 +857,31 @@ protected function getUrl($elem)
 // $line has same format as line in section "elements" in common template
 function addTag($line)
 {
-	$this->parseLine($line);
-}
+	$elem = $this->parser->parseLine($line);
 
-private function getDocument($def)
-{
-	$pat[0] = "/{([a-z0-9_.]+)}/i";
-	$pat[1] = "/{(BLOCK|IF|IF NOT)\s+([a-z0-9_]+)}/i";
-	$pat[2] = "%{/(BLOCK|IF)}%i";
-
-	$rep[0] = TPL_SEPAR . TPL_ELEM  . TPL_SEPAR . '\\1' . TPL_SEPAR;
-	$rep[1] = TPL_SEPAR . TPL_BLOCK . TPL_SEPAR . '\\2:\\1' . TPL_SEPAR;
-	$rep[2] = TPL_SEPAR . TPL_BLOCK . TPL_SEPAR . 'END:\\1' . TPL_SEPAR;
-
-	if ($this->config['pclib.compatibility']['tpl_syntax']) {
-		$pat[3] = "/<!--\s*BLOCK\s+([a-z0-9_]+)\s*-->/i";
-		$rep[3] = TPL_SEPAR . TPL_BLOCK . TPL_SEPAR . '\\1' . TPL_SEPAR;
+	if ($elem['after']) {
+		$this->elements = $this->insertAfter($this->elements, 
+			array($elem['id'] => $elem), $elem['after']
+		);
 	}
-
-	return explode(TPL_SEPAR, preg_replace($pat, $rep, $def));
-}
-
-private function initBlocks()
-{
-	$this->elements['pcl_document'] = array(
-		'type' => 'block',
-		'begin'=> 0, 'end' => count($this->document)
-	);
-
-	$bstack = array(); $block = null;
-	foreach ($this->document as $key=>$strip) {
-		if ($strip == TPL_ELEM) {
-			list($id,$sub) = explode('.',$this->document[$key+1]);
-			if ($this->elements[$id] and !$this->elements[$id]['block'])
-				$this->elements[$id]['block'] = $block;
-		}
-
-		if ($strip != TPL_BLOCK) continue;
-		list($name,$type) = explode(':',$this->document[$key+1]);
-
-		$type = strtoupper($type);
-		$section = strtoupper($name);
-
-		if ($section == 'END') {
-			if ($block) $this->elements[$block]['end'] = $key;
-			$block = array_pop($bstack);
-		}
-		elseif ($section == 'ELSE') {
-			if ($block) $this->elements[$block]['else'] = $key + 2;
-			$this->document[$key]   = null;
-			$this->document[$key+1] = null;
-		}
-		else {
-			array_push($bstack, $block);
-			$block = $name;
-
-			if ($type == 'IF') {
-				$block = '__if'.$key;
-				$this->elements[$block]['if'] = $name;
-			}
-			elseif($type == 'IF NOT') {
-				$block = '__if'.$key;
-				$this->elements[$block]['ifnot'] = $name;
-			}
-
-			$this->document[$key+1] = $block;
-			$this->elements[$block]['id']    = $block;
-			$this->elements[$block]['type']  = 'block';
-			$this->elements[$block]['block'] = end($bstack);
-			$this->elements[$block]['begin'] = $key + 2;
-			$this->elements[$block]['end'] = $this->elements['pcl_document']['end'];
-
-		}
+	else {
+		$this->elements[$elem['id']] = $elem;
 	}
 }
 
-/**
- * Parse template html-code and fill $document array
- *
- * @param string $def template html-code
- */
-protected function parseTemplate($def)
+
+private function insertAfter(array $a, array $elem, $after)
 {
-	if ($this->translator and strpos('-'.$def,'<M>')) {
-		$def = $this->translator->translateTags($def);
+	$pos = array_search($after, array_keys($a));
+	if ($pos === false) {
+		return array_merge($a, $elem);
 	}
 
-	$this->document = $this->getDocument($def);
-	$this->initBlocks();
-}
-
-/**
- * Parse template elements definition block and fill $elements array
- *
- * @param string $def elements definition block
- */
-protected function parseElements($def)
-{
-	if (trim($def) == '') return;
-	$this->elements = array();
-
-	$def = str_replace('\"', '&quot;', $def);
-	$lines = explode(EOL, $def);
-	foreach ($lines as $line) {
-		$line = trim($line);
-		if ($line == '') continue;
-		$this->parseLine($line);
-	}
-}
-
-/**
- * Parse element definition line and save element to $elements array.
- */
-protected function parseLine($line)
-{
-	$terms = preg_split("/[\s]+/", $line);
-	$type = array_shift($terms);
-	$id = array_shift($terms);
-	$this->elements[$id]['type'] = $type;
-	$this->elements[$id]['id'] = $id;
-
-	while ($term = array_shift($terms)) {
-		$value = ($terms and $terms[0][0] == "\"")? $this->readQTerm($terms) : 1;
-		if (strpos($term,'html_')===0) {
-			if ($value === 1) $this->elements[$id]['html'][] = substr($term,5);
-			else $this->elements[$id]['html'][substr($term,5)] = $value;
-		}
-		else
-			$this->elements[$id][$term] = $value;
-	}
-
-	if ($this->elements[$id]['lb']) {
-		$this->elements[$id]['lb'] = $this->t($this->elements[$id]['lb']);
-	}
-
-	return $id;
-}
-
-/** Read quoted value of attribute */
-private function readQTerm(&$terms)
-{
-	$term = array_shift($terms);
-	while ((substr($term, -1) != "\"" and count($terms)) or strlen($term) == 1) {
-		$term .= " " . array_shift($terms);
-	}
-	return str_replace('&quot;', '"', substr($term, 1, -1));
+	return array_merge(
+    array_slice($a, 0, $pos+1),
+    $elem,
+    array_slice($a, $pos+1, null)
+  );
 }
 
 function htmlTag($name, $attr = array(), $content = null, $startTagOnly = false)
@@ -991,7 +910,7 @@ function htmlTag($name, $attr = array(), $content = null, $startTagOnly = false)
 
 function escapeHtml($s)
 {
-	return htmlspecialchars($s);
+	return utf8_htmlspecialchars($s);
 }
 
 /**
@@ -1027,7 +946,7 @@ protected function formatStr($s, $fmt)
 	$len = strlen($fmt);
 	for($i = 0; $i < $len; $i++) {
 		switch ($fmt{$i}) {
-		case "n": $s = nl2br($s); break;
+		case "n": $s = nl2br($s, $this->useXhtml); break;
 		case "h": $s = utf8_htmlspecialchars($s); break;
 		case "H": $s = strip_tags($s); break;
 		case "u": $s = utf8_strtoupper($s); break;
@@ -1092,13 +1011,18 @@ protected function getLkpLookup($lookup)
 	return $this->service('db')->selectPair($sql);
 }
 
-protected function getDataSource($rs)
+protected function getDataSource($name)
 {
-	$ra = $this->app->splitRoute($this->replaceParams($rs));
-	$route = $ra['route'];
-	$ct = $this->app->getController($route[0]);
-	$args = $ct->getArgs($route[1], $ra['params']);
-	return call_user_func_array(array($ct, $route[1]), $args);
+	if (is_callable($name)) {
+		return call_user_func($name);
+	}
+	else {
+		$action = new Action($this->replaceParams($name));
+		$ct = $this->app->newController($action->controller);
+		if (!$ct) throw new Exception("Cannot get datasource '%s'", array($name));
+		$args = $ct->getArgs($action->method, $action->params);
+		return call_user_func_array(array($ct, $action->method), $args);
+	}
 }
 
 protected function getLkpList($list)

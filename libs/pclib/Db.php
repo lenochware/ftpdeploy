@@ -12,6 +12,9 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
+namespace pclib;
+use pclib;
+
 /**
  * Simple database wrapper.
  * Features:
@@ -22,7 +25,7 @@
  * - SQL injection protection
  * - Drivers for different database engines (mysql, pgsql, sqlite, pdo_mysql and pdo_pgsql)
  */
-class Db extends BaseObject implements IService
+class Db extends system\BaseObject implements IService
 {
 /* Log-level: 1:Errors; 2:Each query @deprecated */
 public $logging = 1;
@@ -128,23 +131,24 @@ function connect($dataSource)
 	elseif (is_array($dataSource) and array_key_exists ('driver', $dataSource)) {
 		$dsarray = $dataSource;
 	}
-	else throw new InvalidArgumentException('Invalid connection parameters.');
+	else throw new \InvalidArgumentException('Invalid connection parameters.');
 	
 	$this->dataSource = $dataSource;
 
 	$drvname = pcl_ident($dsarray['driver']);
 	
 	if (strpos($drvname, 'pdo_') === 0) {
-		$drvname = 'Pdo'.ucfirst(substr($drvname, 4)).'Driver';
+		$className = '\\pclib\\system\\database\\Pdo'.ucfirst(substr($drvname, 4)).'Driver';
 	}
 	else {
-		$drvname = ucfirst($drvname).'Driver';
+		$className = '\\pclib\\system\\database\\'.ucfirst($drvname).'Driver';
 	}
 
-	$drvpath = PCLIB_DIR.'system/database/'.$drvname.'.php';
-	if (!file_exists($drvpath)) throw new DatabaseException("Database driver $drvname not found.");
-	require_once($drvpath);
-	$this->drv = new $drvname;
+	if (!class_exists($className)) {
+		throw new DatabaseException("Database driver '%s' not found.", array($dsarray['driver']));
+	}
+
+	$this->drv = new $className;
 	$this->drv->verboseErrors = in_array('develop', $this->config['pclib.errors']);
 	$this->drv->forceReconnect = $this->forceReconnect;
 	$this->drv->connect($dsarray);
@@ -401,8 +405,9 @@ function runDump($fileName, $skipErrors = false)
 **/
 function replace($tab, $data)
 {
-	if (get_class($this->drv) != 'mysql')
+	if (!in_array($this->drv->extension, array('mysql', 'pdo_mysql'))) {
 		throw new NotImplementedException;
+	}
 	
 	if (is_array($data)) {
 		$sep = '';
@@ -501,7 +506,7 @@ function count($dsstr = null)
 		$sql = $this->getSelectSql($dsstr, $args);
 		return $this->field($sql);
 	}
-	else throw new InvalidArgumentException;
+	else throw new \InvalidArgumentException;
 }
 
 /**
@@ -549,6 +554,30 @@ function fetchAll($res = null, $fmt = 'a')
 		$rows[] = $row;
 	}
 	return $rows;
+}
+
+/**
+ * Begins a transaction.
+ */
+public function beginTransaction()
+{
+	$this->query('START TRANSACTION');
+}
+/**
+ * Commits statements in a transaction.
+ */
+
+public function commit()
+{
+	$this->query('COMMIT');
+}
+
+/**
+ * Rollback changes in a transaction.
+ */
+public function rollback()
+{
+	$this->query('ROLLBACK');
 }
 
 /** Return current database name */
@@ -736,7 +765,7 @@ protected function getSelectSql($dsstr, $args)
 		}
 	}
 	elseif ($this->isSql($dsstr, 'select') or $this->isSql($dsstr, '(select')) $sql = $dsstr;
-	else throw new InvalidArgumentException('Only SELECT query allowed.');
+	else throw new \InvalidArgumentException('Only SELECT query allowed.');
 	
 	$params = null;
 	if (count($args)) {
@@ -752,7 +781,7 @@ protected function getSelectSql($dsstr, $args)
  */
 protected function getWhereSql($cond, $args)
 {
-	if (is_numeric($cond)) throw new InvalidArgumentException;
+	if (is_numeric($cond)) throw new \InvalidArgumentException;
 	if (is_array($cond)) {
 		foreach($cond as $k => $v){
 			$s .= " AND ".$this->escape($k,'ident')."='".$this->escape($v)."'";
@@ -766,7 +795,7 @@ protected function getWhereSql($cond, $args)
 		}
 		else $where = $cond;
 	}
-	else throw new InvalidArgumentException;
+	else throw new \InvalidArgumentException;
 	return $where;
 }
 

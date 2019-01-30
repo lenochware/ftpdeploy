@@ -12,18 +12,23 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
+namespace pclib\system;
+use pclib\Tpl;
+
 /**
  * Catch errors and exceptions and show improved error messages.
  * You can configure behavior of $app->errorHandler with pclib.errors config parameter.
  * Features:
  * - Development error reporting with stack trace
- * - Customizable error template for production enviroment
+ * - Customizable error template for production environment
  * - Store errors to the log
  * - Hook your own function (e.g. mail) to onException handler
  */
 class ErrorHandler extends BaseObject
 {
-	public $options;
+	/** var array [log, display, develop, error_reporting, template] */
+	public $options = array();
+
 	public $MESSAGE_PATTERN = "<b>{severity} {code}: {exceptionClass}</b> {message}";
 
 	/** Occurs before Exception handling. */ 
@@ -65,6 +70,11 @@ class ErrorHandler extends BaseObject
 		if (in_array('log', $this->options)) $this->logError($e);
 		if (!in_array('display', $this->options)) return;
 
+		if ($e instanceof \pclib\ApiException) {
+			http_response_code(500);
+			die($e->getMessage());
+		}
+
 		if (in_array('develop', $this->options)) {
 			$this->displayError($e);
 		}
@@ -89,14 +99,14 @@ class ErrorHandler extends BaseObject
 			if (!error_reporting()) return;
 
 			$this->_onWarning(
-				new ErrorException($message, $code, 0, $file, $line)
+				new \ErrorException($message, $code, 0, $file, $line)
 			);
 			
 			return;
 		}
 
 		$this->_onException(
-			new ErrorException($message, $code, 0, $file, $line)
+			new \ErrorException($message, $code, 0, $file, $line)
 		);
 	}
 
@@ -137,8 +147,10 @@ class ErrorHandler extends BaseObject
 			'message' => $e->getMessage(),
 			'file' => $e->getFile(),
 			'line' => $e->getLine(),
-			'trace' => $e->getTrace(),
+			'trace' => $e->getTraceAsString(),
 			'htmlTrace' => $this->getHtmlTrace($e),
+			'route' => $_REQUEST['r'],
+			'timestamp' => date('Y-m-d H:i:s'),
 		);
 		return $values;
 	}
@@ -159,7 +171,7 @@ class ErrorHandler extends BaseObject
 			paramStr($this->MESSAGE_PATTERN, $this->getValues($e)),$e);
 		}
 		//fallback to most straighforward error message
-		catch(Exception $ex) {
+		catch(\Exception $ex) {
 			print $e->getMessage();
 			print "<br>Error while displaying exception: ".$ex->getMessage();
 		}
@@ -170,13 +182,17 @@ class ErrorHandler extends BaseObject
 	 */	
 	function displayProductionError($e)
 	{
+		if (!headers_sent()) {
+			header($_SERVER['SERVER_PROTOCOL'] . ' 500 Internal Server Error', true, 500);
+		}
+
 		try {
 			$template = $this->options['template'];
 			$t = new Tpl($template? $template : PCLIB_DIR.'assets/error.tpl');
 			$t->values = $this->getValues($e);
 			print $t->html();
 		}
-		catch(Exception $ex) {
+		catch(\Exception $ex) {
 			print $e->getMessage();
 			print "<br>Error while displaying exception: ".$ex->getMessage();
 		}
@@ -188,10 +204,10 @@ class ErrorHandler extends BaseObject
 			$error = $this->getValues($e);
 			
 			$this->service('logger')->log($error['severity'], $error['severity'],
-				paramStr("{severity}: {message} in {file} on line {line}", $error)
+				paramStr("{exceptionClass}: {message} in '{file}' on line {line} processing '{route}' at {timestamp}", $error)
 			);
 		}
-		catch(Exception $ex) {
+		catch(\Exception $ex) {
 			print "<br>Error while logging exception: ".$ex->getMessage();
 		}
 	}

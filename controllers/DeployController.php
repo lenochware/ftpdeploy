@@ -3,7 +3,7 @@ include 'libs/FileSync.php';
 include 'libs/TextLogger.php';
 include 'libs/class.Diff.php';
 
-class DeployController extends App_Controller {
+class DeployController extends PCController {
 
 /*var TextLogger */
 protected $logger;
@@ -12,7 +12,7 @@ protected $logger;
 protected $result;
 
 function indexAction() {
-  $grid = new Grid('tpl/tasks.tpl');
+  $grid = new PCGrid('tpl/tasks.tpl');
   $grid->setArray($this->getTasks());
   return $grid;
 }
@@ -46,7 +46,7 @@ function initAction($task)
     $this->app->redirect('deploy/preview/task:'.$task);    
   }
 
-  $grid = new Grid('tpl/preview_init.tpl');
+  $grid = new PCGrid('tpl/preview_init.tpl');
 
   $allFiles = $this->getDiff($config['local'], array(), $hashes);
   $grid->setArray($allFiles);
@@ -73,7 +73,7 @@ function previewAction($task)
   $hashes = $this->createHashArray($files);
   $savedHashes = $this->loadHashFile($task);
 
-  $grid = new GridForm('tpl/preview.tpl');
+  $grid = new pclib\Extensions\GridForm('tpl/preview.tpl');
   $data = $this->getDiff($config['local'], $savedHashes, $hashes);
   $grid->setArray($data);
   $grid->values['TASK'] = $task;
@@ -84,7 +84,7 @@ function previewAction($task)
   $grid->values['REMOTEDIR'] = $datasource['path'];
 
   if (!count($data)) {
-    $grid->form->_commit->noedit = 1;    
+   // $grid->form->_commit->noedit = 1;    
   }
 
   return $grid;

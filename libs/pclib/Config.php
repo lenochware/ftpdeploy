@@ -18,20 +18,23 @@ $config = array(
 	'pclib.locale' => array('date' => '%d. %m. %Y', 'datetime' => '%d.%m.%Y %H:%M%:%S'),
 	'pclib.logger' => array(/*'log' => array('ALL')*/),
 	'pclib.compatibility' => array(
-		'tpl_syntax' => true,
-		'sql_syntax' => true,
-		'controller_underscore_postfixes' => true,
+		'tpl_syntax' => false,
+		'sql_syntax' => false,
+		'legacy_classnames' => false,
 	),
 
 	'pclib.directories' => array(
-		'controllers' => 'controllers/',
 		'logs' => 'temp/log/',
 		'assets' => '{pclib}/assets/',
 		'localization' => '{webroot}{pclib}/localization/',
 	),
 
-	'pclib.tpl.escape' => false,
-	'pclib.auth.secret' => '',
+	'pclib.loader' => array(
+		'controller' => array('dir' => 'controllers', 'namespace' => '', 'postfix' => 'Controller'),
+	),
+
+	'pclib.security' => array('tpl-escape' => false, 'csrf' => false, 'form-prevent-mass' => false),
+	'pclib.auth' => array('algo' => 'md5', 'secret' => 'write any random string!', 'realm' => ''),
 );
 
 ?>

@@ -6,6 +6,7 @@ input COMMENT size "100"
 input PASSWORD password
 bind STATUS_TEXT list "modified,změna,deleted,smazáno,created,vytvořeno,unwatch,dál nesledovat" field "STATUS"
 button commit lb " Publikovat" tag "button" glyph "fa fa-flag"
+pager pager pglen "10000"
 ?>
 <style>
 	.created { color: blue;}
@@ -69,22 +70,6 @@ Celkem {TOTAL} souborů.
 </tr>
 </table>
 <script language="JavaScript">
-
-// var selected = false;
-// var selecting = false;
-
-// function toggleSelected()
-// {
-// 	selected = !$(this).hasClass('selected');
-// 	setSelected(this);
-// }
-
-// function setSelected(tr)
-// {
-// 	var checkbox = $(tr).find(':checkbox').get(0);
-// 	checkbox.checked = selected;
-// 	$(tr).toggleClass('selected', selected);
-// }
 
 function init()
 {

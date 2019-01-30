@@ -1,3 +1,7 @@
+<?elements
+class grid name "preview_init"
+pager pager pglen "10000"
+?>
 <form action="?r=deploy/init&task={TASK}" method="post">
 <h1>Inicializace</h1>
 <table class="form">

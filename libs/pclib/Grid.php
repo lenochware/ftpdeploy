@@ -12,7 +12,8 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
-require_once PCLIB_DIR . 'Tpl.php';
+namespace pclib;
+use pclib;
 
 /**
  * Displaying tabular data in table layout.
@@ -41,8 +42,8 @@ public $multiSort = false;
 
 public $renderSortIcons = true;
 
-/** array pager - Configuration and state of %grid pager. */
-public $pager = array();
+/** var GridPager */
+public $pager;
 
 /** Array of values for array-based %grid. */
 protected $dataArray;
@@ -56,10 +57,12 @@ public $sortArray = array();
 /** %grid sql query. */
 protected $sql;
 
-protected $route;
+protected $baseUrl;
 
 /** Name of the 'class' element */
 protected $className = 'grid';
+
+protected $page;
 
 private $hash;
 
@@ -70,18 +73,60 @@ protected function _init()
 {
 	parent::_init();
 
-	$this->route = $this->getRoute();
-
-	$pgid = ifnot($this->header['pager'], 'pager');
-	$this->pager += (array)$this->elements[$pgid];
+	$this->baseUrl = $this->getBaseUrl();
 
 	if ($_GET['grid'] == $this->name or !$_GET['grid']) {
 		if ($_GET['page']) {
-			$page = $_GET['page'];
-			$this->pager['page'] = ($page === 'all')? 'all' : (int)$page;
+			$this->page = $_GET['page'];
 		}
-		if (isset($_GET['sort'])) $this->setSort($_GET['sort']);
 	}
+	if (isset($_GET['sort'])) $this->setSort($_GET['sort']);
+
+	$this->initPager();
+}
+
+/**
+ * Create and configure grid pager.
+ */
+protected function initPager()
+{
+	$pager = $this->getPager();
+
+	$pgid = $this->elements['pcl_document']['typelist']['pager'];
+	$el = $this->elements[$pgid];
+
+	if ($el['ul']) {
+		$pager->pattern = '%1$s%3$s%2$s';
+		$pager->patternItem = '<li class="%s">%s</li>';
+	}
+	if ($el['pglen']) {
+		$pager->setPageLen($el['pglen']);
+	}
+	if ($el['size']) {
+		$pager->linkNumber = $el['size'];
+	}
+
+	$pager->setPage($this->page);
+
+	$this->pager = $pager;
+}
+
+/**
+ * Return instance of GridPager.
+ */
+protected function getPager()
+{
+	return new GridPager($this->length, $this->baseUrl);
+}
+
+/**
+ * Set active (selected) page.
+ * @param int $page Page number
+ */
+function setPage($page)
+{
+	$this->page = $page;
+	$this->pager->setPage($page);
 }
 
 /**
@@ -90,7 +135,6 @@ protected function _init()
  */
 protected function _out($block = null)
 {
-	$this->getPager();
 	$this->values['items'] = $this->getValues();
 
 	if ($this->config['pclib.compatibility']['tpl_syntax'] and !$this->elements['items']['else']) {
@@ -125,11 +169,12 @@ function setQuery($sql)
 	$sql = $this->db->setParams($sql, $args + (array)$this->filter);
 	$sql = str_replace("\n", " \n ", strtr($sql, "\r\t","  "));
 
-	$this->length = $this->db->count($sql);
+	if (!$this->document) $this->create($sql);
+
+	$this->setLength($this->db->count($sql));
 
 	if ($lpos = stripos($sql, ' limit ')) $sql = substr($sql, 0, $lpos);
 	$this->sql = $sql;
-	if (!$this->document) $this->create($this->sql);
 }
 
 /**
@@ -143,7 +188,12 @@ function setQuery($sql)
 function setArray(array $dataArray, $totalLength = 0)
 {
 	$this->dataArray = $this->applyFilter($dataArray);
-	$this->length = $totalLength? $totalLength : count($this->dataArray);
+	$this->setLength($totalLength ?: count($this->dataArray));
+}
+
+function setSelection(orm\Selection $sel)
+{
+	$this->setQuery($sel->getSql());
 }
 
 /**
@@ -185,11 +235,6 @@ function setSort($s)
 	}
 }
 
-function setPage($page)
-{
-	$this->pager['page'] = $page;
-}
-
 /**
  * Load %grid object from session.
  * Called when $sessname in constructor is set. Do not call directly.
@@ -206,7 +251,7 @@ function loadSession()
 	$this->length = $s['length'];
 	$this->filter = $s['filter'];
 	$this->sortArray = $s['sortarray'];
-	$this->pager['page'] = $s['page'];
+	$this->page = $s['page'];
 }
 
 /**
@@ -223,7 +268,7 @@ function saveSession()
 		'hash'   => $this->hash,
 		'length' => $this->length,
 		'filter' => $this->filter,
-		'page'   => $this->pager['page'],
+		'page'   => $this->pager->getValue('active'),
 		'sortarray' => $this->sortArray,
 	);
 
@@ -237,7 +282,8 @@ function saveSession()
 **/
 static function invalidate($sessName)
 {
-	$this->app->deleteSession("$sessName.hash");
+	global $pclib;
+	$pclib->app->deleteSession("$sessName.hash");
 }
 
 
@@ -280,82 +326,25 @@ function print_Element($id, $sub, $value)
 /**
  * Print %grid pager.
  * {pager} tag will show default pager, for modificators - see \ref grid-tags.
- * You can reimplement this in descendant for your own pager.
  * @copydoc tag-handler
  */
 function print_Pager($id, $sub)
 {
-	if ($this->pager['hidden']) return;
+	$pgid = $this->elements['pcl_document']['typelist']['pager'];
+	$el = $this->elements[$pgid];
 
-	//default pager
-	if (!$sub) {
-		if ($this->pager['ul']) {
-			$this->print_Pager($id, 'first');
-			$this->print_Pager($id, 'pages');
-			$this->print_Pager($id, 'last');
-		}
-		else {
-			$this->print_Pager($id, 'first');
-			print " | ";
-			$this->print_Pager($id, 'last');
-			print " | ";
-			$this->print_Pager($id, 'pages');
-		}
+	if ($this->pager->getValue('maxpage') < 2 and !$el['nohide']) return;
+
+	if ($this->values[$pgid]) {
+		print $this->values[$pgid];
 		return;
 	}
 
-	//list of pages
-	if ($sub == 'pages') {
-		$page  = $this->pager['page'];
-		if ($page == 'all') return;
-		$begin = $this->pager['begin'];
-		$end   = $this->pager['end'];
-
-		$activefmt = $this->pager['active'];
-
-		for ($i = $begin; $i <= $end; $i++) {
-			if ($i == $page) {
-				$activepage = $activefmt? sprintf ($activefmt, $i) : $i;
-				$this->printPagerItem($activepage, $sub, null, true);
-			}
-			else {
-				$url = $this->pagerUrl($i);
-				$this->printPagerItem($i, $sub, $url);
-			}
-		}
-		return;
-	}
-
-	switch ($sub) {
-			case "total":   print $this->length;           break;
-			case "maxpage": print $this->pager['maxpage']; break;
-			case "page":    print $this->pager['page'];    break;
-			case "first":  $url = $this->pagerUrl(1);     break;
-			case "last":   $url = $this->pagerUrl($this->pager['maxpage']); break;
-			case "next":   $url = $this->pagerUrl($this->pager['next']);    break;
-			case "all":    $url = $this->pagerUrl('all');  break;
-			case "prev":
-			case "previous": $url = $this->pagerUrl($this->pager['prev']); break;
-	} //switch
-
-	if ($url) {
-		$lb = $this->t(ucfirst($sub));
-		$this->printPagerItem($lb, $sub, $url);
-	}
-}
-
-protected function printPagerItem($lb, $sub, $url = null, $active = false)
-{
-	$cls = '';
-	if ($active) $cls .= ' active';
-	if (!$url)   $cls .= ' disabled';
-	if ($cls) $cls = ' class="'.trim($cls).'"';
-	if ($this->pager['ul']) {
-		print "<li$cls><a href=\"$url\">$lb</a></li>";
+	if ($sub) {
+		print $this->pager->getHtml($sub);
 	}
 	else {
-		$s = $url? "<a href=\"$url\">$lb</a>" : $lb;
-		print $this->pager['separ']."<span$cls>$s</span>";
+		print $this->pager->html();
 	}
 }
 
@@ -373,10 +362,7 @@ protected function sortUrl($id)
 		$s = ($sa[$id] == $id)? $id.':d' : $id;
 	}
 
-	$ra = $this->route;
-	$ra['params']['sort'] = $s;
-	$ra['params']['page'] = 1;
-	return $this->app->getUrl($ra);
+	return $this->baseUrl."sort=$s&page=1";
 }
 
 /**
@@ -402,8 +388,11 @@ function print_Sort($id, $sub)
  * @see Tpl::print_class()
  * @copydoc tag-handler
  */
-protected function print_Class_Item($id, $sub)
+protected function trPrintElement($elem)
 {
+	$id = $elem['id'];
+	$sub = $elem['sub'];
+
 	if ($sub == 'labels') {
 		print '<th>';
 		$this->print_Element($id, 'lb', null);
@@ -418,6 +407,25 @@ protected function print_Class_Item($id, $sub)
 	}
 }
 
+/** Get template variable _tvar_... */
+protected function getVariable($id)
+{
+	$page = $this->pager->getValue('page');
+	$maxpage =  $this->pager->getValue('maxpage');
+
+	switch ($id) {
+		case '_tvar_first': 
+			$value = ($page == 1 and parent::getVariable('_tvar_top'))? '1':'0';
+		break;	
+		case '_tvar_last': 
+			$value = ($page == $maxpage and parent::getVariable('_tvar_bottom'))? '1':'0';
+		break;	
+		default: return parent::getVariable($id);
+	}
+	
+	return $this->escapeHtmlFunction($value);
+}
+
 /**
  * Load values for current page from database (fill \ref tpl::values array).
  * tpl::values are not cleared, so you can add additional fields from the code.
@@ -427,17 +435,27 @@ protected function getValues()
 	if ($this->dataArray) return $this->getDataArray();
 
 	$q = $this->getQuery();
-	if (!$q) {$this->length = 0; return array(); }
+	if (!$q) {$this->setLength(0); return array(); }
 
 	$rows = $this->db->fetchAll($q);
 
 	//sumgrid hack...
-	if (count($rows) > $this->pager['pglen']) $last = array_pop($rows);
+	if (count($rows) > $this->pager->getValue('pglen')) $last = array_pop($rows);
 	if ($this->sumArray) $this->sumArray['items']['last'] = $last;
 
 	return $rows;
 }
 
+/**
+ * Set grid->length (total number of rows).
+ * @param int $length Number of rows
+ */
+protected function setLength($length)
+{
+	$this->length = $length;
+	$this->pager->setLength($length);
+	$this->pager->setPage($this->page);
+}
 
 /**
  * Load values for current page from dataarray (array-based %grid).
@@ -445,9 +463,8 @@ protected function getValues()
  */
 protected function getDataArray()
 {
-	$pglen = $this->pager['pglen'];
-
-	$begin = ($this->pager['page'] - 1) * $this->pager['pglen'];
+	$pglen = $this->pager->getValue('pglen');
+	$begin = ($this->pager->getValue('active') - 1) * $this->pager->getValue('pglen');
 
 	if ($this->sortArray) {
 		if (!isset($this->dataArray[0])) $begin = 0; //fix reseting keys in usort
@@ -511,14 +528,14 @@ protected function getQuery()
 				continue;
 			}
 			$sort = $this->elements[$id]['sort'];
-			$orderby .= ','.(($sort and $sort != '1')? $sort : $id);
+			$orderby .= ','.$this->getOrderByField($id);
 			if ($id != $sval) $orderby .= ' desc';
 		}
 		if ($orderby) $sql .= ' order by '.substr($orderby, 1);
 	}
 
-	$page  = $this->pager['page'];
-	$pglen = $this->pager['pglen'];
+	$page  = $this->pager->getValue('active');
+	$pglen = $this->pager->getValue('pglen');
 
 	if ($page != 'all')
 		$this->db->setLimit($pglen + 1, ((int)$page-1) * $pglen);
@@ -526,123 +543,102 @@ protected function getQuery()
 	return $this->db->query($sql);
 }
 
-/**
- * Build default grid template.
- * @see Tpl::create()
- */
-function create($dsstr, $fileName = null, $template = null)
+//sort bind alphabetically by labels
+protected function getOrderByField($id)
 {
-	$trans = array('<:' => '<', ':>' => '>', '{:' => '{', ':}' => '}');
-	if (!$template) $template = PCLIB_DIR.'assets/def_grid.tpl';
-
-	$table = $this->db->tableName($dsstr);
-	$columns = $this->db->columns($table);
-
-	$fields = $this->getFields($dsstr);
-	$head = $body = array();
-	foreach($fields as $id) {
-		$col = $columns[$id];
-		$lb = ifnot($col['comment'], $id);
-		$elem .= "string $id lb \"$lb\" sort";
-		if ($col['type'] == 'date') $elem .= ' date';
-		$elem .= "\n";
-		$head[]['LABEL'] = '{'.$id.'.lb}';
-		$body[]['FIELD'] = '{'.$id.'}';
-	}
-
-	$t = new Tpl($template);
-	$t->values['NAME'] = $this->db->tableName($dsstr);
-	$t->values['HEAD'] = $head;
-	$t->values['BODY'] = $body;
-	$t->values['ELEMENTS'] = trim($elem);
-	$html = strtr($t->html(), $trans);
-
-	if ($fileName) {
-		$ok = file_put_contents($fileName, $html);
-		if (!$ok) throw new IOException("Cannot write file $fileName.");
-		else @chmod($fileName, 0666);
-	}
-	else {
-		$this->loadString($html);
-		$this->init();
-	}
+	$sort = $this->elements[$id]['sort'];
+	if ($this->elements[$id]['type'] == 'bind') {
+		$sortedIds = array_keys($this->getItems($id));
+		if ($sortedIds) return "FIELD($id, ".implode(',', $sortedIds).')';
+	} 
+	return ($sort and $sort != '1')? $sort : $id;
 }
 
-/** get proper base route for %grid sort and pager & other links */
-protected function getRoute()
+
+/**
+ * Use default template for displaying database table content.
+ */
+function create($tableName)
 {
-	$ra = $this->app->splitRoute($_GET['r']);
-	$par = $_GET; unset($par['sort'],$par['page'],$par['r']);
-	if (!$this->header['singlepage']) $par['grid'] = $this->name;
-	$ra['params'] = $par;
-	return $ra;
+	$tableName = $this->db->tableName($tableName);
+	$this->createFromTable($tableName, PCLIB_DIR.'assets/default-grid.tpl');
 }
 
 /**
- * Fill #$pager array with up-to-date values.
- * @see print_pager()
+ * Return content of the grid as csv-text.
+ * @param array $options [csv-separ: ';', csv-row-separ: "\r\n"]
+ * @return string csv-text
  */
-function getPager()
+function getExportCsv($options = [])
 {
-	if (!$this->pager['page'])  $this->pager['page'] = 1;
-	if (!$this->pager['size'])  $this->pager['size'] = 10;
-	if (!$this->pager['separ']) $this->pager['separ'] = ' ';
-	if (!$this->pager['pglen']) $this->pager['pglen'] = $this->length;
+	$this->pager->setPageLen($this->length);
+	$elements = $this->elements;
+	$values = $this->getValues();
+	$this->values['items'] = $values;
 
-	if (!$this->pager['pglen']) $this->pager['maxpage'] = 0;
-	else $this->pager['maxpage'] = ceil($this->length / $this->pager['pglen']);
+	$options += ['csv-separ' => ';', 'csv-row-separ' => "\r\n"];
+	
+	$ignore_list = array('class','block','pager','sort');
 
-	if ($this->pager['page'] > $this->pager['maxpage'])
-		$this->pager['page'] = $this->pager['maxpage'];
+	$elms = [];
+	foreach($this->elements as $id => $elem) {
+		if ($elem['noprint'] or $elem['skip'] or in_array($elem['type'], $ignore_list)) continue;
+		unset($elem['title'], $elem['size']);
+		$elms[$id] = $elem;
+		$last_id = $id;
+	}
+	$this->elements = $elms;
 
-	if ($this->pager['maxpage'] < 2 and !$this->pager['nohide'])
-		$this->pager['hidden'] = true;
-	else
-		$this->pager['hidden'] = false;
+	ob_start();
 
-	if ((string)$this->pager['page'] == 'all') {
-		$this->pager['pglen'] = $this->length;
+	foreach($elms as $id => $elem) {
+		print $elem['lb'] ?: $elem['id'];
+		if ($id != $last_id) print $options['csv-separ'];
+	}
+	print $options['csv-row-separ'];
+
+	foreach ($values as $i => $row) {
+		foreach($elms as $id => $elem) {
+			$this->print_Element($id, '', $row[$id]);
+			if ($id != $last_id) print $options['csv-separ'];
+		}
+		if($values[$i+1]) print $options['csv-row-separ'];
 	}
 
-	list($this->pager['begin'], $this->pager['end'])
-		= $this->pagerRange($this->pager['page'], $this->pager['size']);
+	$this->elements = $elements;
 
-	$this->pager['prev'] = $this->pager['page'] - 1;
-	$this->pager['next'] = $this->pager['page'] + 1;
-	if ($this->pager['prev'] < 1) $this->pager['prev'] = 1;
-	if ($this->pager['next'] > $this->pager['maxpage'])
-		$this->pager['next'] = $this->pager['maxpage'];
+	$output = ob_get_contents();
+	ob_end_clean();
+	return $output;
 }
 
-/** Return \<begin,end> interval of pages around $page, with $size = end - begin.
- * Interval is always inside total range of pages.
- * @see getpager()
+/**
+ * Show download dialog for csv-file with content of the grid.
+ * @param array $options
+ * @see getExportCsv()
  */
-protected function pagerRange($page, $size)
+function exportCsv($fileName, $options = array())
 {
-	$maxpage = $this->pager['maxpage'];
-	$middle = floor($size / 2);
+	ob_clean();
+	header('Content-type: text/csv');
+	header('Content-Disposition: attachment; filename="'.$fileName.'"');
+	print $this->getExportCsv($options);
+	die();
+}
 
-	if ($maxpage > $size) {
-		if ($page > $middle) $begin = $page - $middle + 1; else $begin = 1;
-		if ($maxpage - $page <= $middle) $begin = $maxpage - $size + 1;
-		$end = $begin + $size - 1;
-		return array($begin, $end);
+/** get proper base url for %grid sort and pager & other links */
+protected function getBaseUrl()
+{
+	$url = $this->getUrl($this->header);
+	if (!$url) {
+		$a = clone $this->service('router')->action;
+		unset($a->params['sort'], $a->params['page']);
+		if (!$this->header['singlepage']) $a->params['grid'] = $this->name;
+		$url = $this->service('router')->createUrl($a);
 	}
-	else return array(1, $this->pager['maxpage']);
 
+	return $url . ((strpos($url,'?') === false)? '?' : '&');
 }
-
-/** Return %grid url for page $page.
- * @see print_pager()
- */
-protected function pagerUrl($page)
-{
-	$ra = $this->route;
-	$ra['params']['page'] = $page;
-	return $this->app->getUrl($ra);
-}
-
 
 private function sumFieldEquals(array $sum)
 {
@@ -650,7 +646,7 @@ private function sumFieldEquals(array $sum)
 	if ($this->sumArray['items']['pos'] > $sum['pos']) $rowno--;
 	$v1 = $this->values['items'][$rowno][$sum['field']];
 	$v2 = $this->values['items'][$rowno+1][$sum['field']];
-	if ($rowno == $this->pager['pglen']-1) $v2 = $this->sumArray['items']['last'][$sum['field']];
+	if ($rowno == $this->pager->getValue('pglen')-1) $v2 = $this->sumArray['items']['last'][$sum['field']];
 	return ($v1 == $v2);
 }
 
@@ -675,14 +671,6 @@ protected function print_BlockRow($block, $rowno = null)
 	else {
 		parent::print_BlockRow($block, $rowno);
 	}
-}
-
-protected function parseLine($line)
-{
-	$id = parent::parseLine($line);
-	if ($this->elements[$id]['type'] == 'pager')
-		$this->header['pager'] = $id;
-	return $id;
 }
 
 /**

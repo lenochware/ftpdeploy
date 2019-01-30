@@ -12,11 +12,14 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
+namespace pclib;
+use pclib;
+
 /**
  * @class Debugger
  *  Provides API for variable dumps, stack trace and profiling.
  */
-class Debugger extends BaseObject implements IService
+class Debugger extends system\BaseObject implements IService
 {
 
 /** Html or plaintext output.*/
@@ -42,6 +45,12 @@ function __construct()
 	if (version_compare(phpversion(), "5.3.0", "<")) $this->showPrivate = false;
 }
 
+//More unique uniqid()
+protected function uniqId()
+{
+	return 'd-'.substr(md5(uniqid(null,true)),0,10);
+}
+
 //VARDUMP
 
 /**
@@ -53,7 +62,7 @@ protected function dumpArray($name, $variable, $level = 0)
 {
 	$type = gettype($variable);
 	$meta = array(
-	'id' => uniqid('dd'),
+	'id' => $this->uniqId(),
 	'name' => $name,
 	'type' => $type,
 	'level' => $level,
@@ -102,7 +111,7 @@ protected function getArray($variable, $level)
 protected function getObject($variable, $level)
 {
 	$nodes = array();
-	$rc = new ReflectionClass($variable);
+	$rc = new \ReflectionClass($variable);
 	$props = $rc->getProperties();
 	foreach ($props as $prop) {
 		$private = $prop->isPrivate()? 1 : ($prop->isProtected()? 2 : 0);
@@ -144,13 +153,14 @@ protected function spanBox($id, $title, $content, $opened = true, $css_title = '
 protected function strDump(array $meta, array $options = array())
 {
 	$html = '';
-	$opened = isset($options['opened'])? $options['opened'] : true;
 	$lpad = str_repeat(' ',$this->INDENT_WIDTH*$meta[0]['level']);
 	foreach($meta as $node) {
 		$html .= $lpad;
 		$name = $node['name'];
 		$value = $node['value'];
 		$nodes = $node['nodes'];
+		$opened = isset($options['opened'])? $options['opened'] : ($node['type'] == 'array');
+
 
 		if ($node['indexed'] and !$node['nested'] and $node['printsize'] < 500) {
 			$html .= $name.': '.$value;
@@ -207,7 +217,7 @@ protected function stringify($v, $colorize = true)
 		case 'boolean': $s = $v? 'true':'false'; break;
 		case 'array':   $s = ($n = count($v))? "array($n)" : "array()"; break;
 		case 'object':  $s = 'object('.get_class($v).')'; break;
-		case 'resource': $s = '<'.get_resource_type($v).'>'; break;
+		case 'resource': $s = 'resource('.get_resource_type($v).')'; break;
 		default: $s = $v;
 	}
 	if ($this->useHtml and $colorize) $s = $this->colorize($s, $type);
@@ -360,7 +370,7 @@ function errorDump($message, $e = null)
 	$s = ($this->useHtml and $pclib->utf8)? '<meta charset="utf-8">':'';
 	$s .= $message.' ';
 	if ($this->useHtml) {
-		$s .= $this->spanBox(uniqid('dd'), $this->tracePath(2,$e),
+		$s .= $this->spanBox($this->uniqId(), $this->tracePath(2,$e),
 			$this->getTrace($e), false, 'cursor:pointer;border-bottom:1px dotted black;'
 		);
 	}

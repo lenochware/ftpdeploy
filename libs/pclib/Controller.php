@@ -1,14 +1,17 @@
 <?php
 
+namespace pclib;
+use pclib;
+
 /**
  *  Base class for any application controller.
- *  Define your controller, say 'products', in file controllers/products.php
- *  like class Products_Controller extends App_Controller.
- *  Now you can define actions such as: function edit_Action() { ... return 'your html'; }
+ *  Define your controller, say 'products', in file controllers/ProductsController.php
+ *  like class ProductsController extends Controller.
+ *  Now you can define actions such as: function editAction() { ... return 'your html'; }
  * It will be called on url '?r=products/edit'.
  * @see App::run()
  */
-class App_Controller extends BaseObject
+class Controller extends system\BaseObject
 {
 
 /**
@@ -33,8 +36,8 @@ function __construct(App $app)
 {
 	parent::__construct();
 	$this->app = $app;
-	if ($this->app->config['pclib.compatibility']['controller_underscore_postfixes']) {
-		$this->ACTION_POSTFIX = '_Action';	
+	if ($this->app->config['pclib.compatibility']['legacy_classnames']) {
+		$this->ACTION_POSTFIX = '_Action';
 	}
 }
 
@@ -53,60 +56,91 @@ function init()
 function getArgs($actionMethod, array $params)
 {
 	$args = array();
-	$rm = new ReflectionMethod($this, $actionMethod);
+	$rm = new \ReflectionMethod($this, $actionMethod);
 	foreach($rm->getParameters() as $param)  {
 		$param_value = $params[$param->name];
 		if (!strlen($param_value) and !$param->isOptional()) {
 			$this->app->error('Required parameter "%s" for page "%s" missing.', null, $param->name, get_class($this) .'/'.$this->action);
 		}
-		if (isset($param_value)) $args[] = $param_value;
+		$args[] = isset($param_value)? $param_value : $param->getDefaultValue();
 	}
-	//if (is_array($params['args'])) $args += $params['args'];
+
 	return $args;
 }
 
 /*
  * Return name of the action to be actually called.
  */
-function findAction($action)
+function findActionName($action)
 {
 	if (!$action) $action = 'index';
-	if (!is_callable(array($this, $action.$this->ACTION_POSTFIX))) {
-		if (method_exists($this, 'default'.$this->ACTION_POSTFIX))
-			return 'default';
-		else
-			return null;
+
+	if (method_exists($this, $action.$this->ACTION_POSTFIX)) {
+		return $action;
 	}
-	return $action;
+	elseif (method_exists($this, 'default'.$this->ACTION_POSTFIX)) {
+		return 'default';		
+	}
+
+	return false;
 }
 
 /**
  * Call action method of the controller, feeding it with required parameters.
- * @param string $action Action method name (without postfix)
-*  @param array $params Action parameters (usually coming from url)
+ * @param Action $action called action.
  */
-public function run($action, array $params = array())
+public function run($action)
 {
-	$this->name = substr(get_class($this),0,-strlen($this->app->CONTROLLER_POSTFIX));
-	$this->action = $this->findAction($action);
+	$this->name = $action->controller;
+	$this->action = $this->findActionName($action->method);
 	$this->init();
 
 	if (!$this->action) {
-		$this->app->error('Page not found: "%s"', null, $this->name.'/'.$action);
+		$this->app->httpError(404, 'Page not found: "%s"', null, $action->path);
 	}
 
 	$action_method = $this->action.$this->ACTION_POSTFIX;
-	$args = $this->getArgs($action_method, $params);
+	$args = $this->getArgs($action_method, $action->params);
+
+	if ($this->action == 'default') {
+		$this->action = $action;
+	}
+
 	return call_user_func_array(array($this, $action_method), $args);
 }
 
 /**
  * Redirect to $route.
- * @deprecated Use $this->app->redirect().
  **/
 function redirect($route)
 {
 	$this->app->redirect($route);
 }
+
+/**
+ * Return model for table $tableName.
+ **/
+function model($tableName, $id = null)
+{
+	$model = orm\Model::create($tableName, array(), false);
+	
+	if ($id) {
+		$found = $model->find($id);
+		if (!$found) return null;
+	}
+
+	return $model;
+}
+
+/**
+ * Return orm\Selection class.
+ **/
+function selection($from = null)
+{
+	$sel = new orm\Selection;
+	if ($from) $sel->from($from);
+	return $sel;
+}
+
 
 }

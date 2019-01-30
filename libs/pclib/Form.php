@@ -13,7 +13,8 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
-require_once PCLIB_DIR . 'Tpl.php';
+namespace pclib;
+use pclib;
 
 /**
  * Create and manage forms.
@@ -35,7 +36,7 @@ class Form extends Tpl
  */
 public $submitted;
 
-/** Occurs before element validation. */
+/** Occurs after validation. */
 public $onValidate;
 
 /** Occurs before uploading of files. */
@@ -46,6 +47,8 @@ public $onSave;
 
 /** Occurs before deleting from database. */
 public $onDelete;
+
+public $fileStorage;
 
 /**
  * Array of error messages filled by validate() function.
@@ -59,9 +62,9 @@ protected $validator;
 
 protected $hidden;
 
-protected $prepared = false;
-
 private $ajax_id;
+
+private $extraHidden = array();
 
 /** Name of the 'class' element */
 protected $className = 'form';
@@ -72,46 +75,67 @@ public $uploadBlackList = array('*.php','*.php?','*.phtml','*.exe','.htaccess');
 /** Generate buttons with html button tag or as input type=button. */
 public $useButtonTag = false;
 
+protected $editables = array('input', 'check', 'radio', 'text', 'select', 'listinput');
+
 protected function _init()
 {
 	parent::_init();
+
+	$this->fileStorage = $this->service('fileStorage', false);
+
+	if ($this->config['pclib.security']['csrf']) {
+		$this->header['csrf'] = true;
+	}
+
+	foreach ($this->elements as $id=>$elem) {
+		if ($elem['hidden']) $this->hidden[$id] = $id;
+		if ($elem['file'] and $elem['type'] == 'input')
+			$this->header['fileupload'] = 1;
+		if ($elem['ajaxget']) $this->header['ajax'] = 1;
+		if (strpos($elem['size'],'/')) {
+			list($sz,$ml) = explode('/',$elem['size']);
+			$this->elements[$id]['size'] = $sz;
+			$this->elements[$id]['maxlength'] = $ml;
+		}
+		if ($elem['type'] == 'check' and $elem['default']) {
+			$this->elements[$id]['default'] = explode(',', $elem['default']);
+		}
+	}
+
+	if ($this->header['table']) {
+		$this->dbSync($this->header['table']);
+	}
+
 	if ($_REQUEST['submitted'] != $this->name) return;
+
+	$this->submitted = $_REQUEST['pcl_form_submit'] ?: true;
+
+	if ($this->header['csrf']
+		and $_REQUEST['csrf_token'] != $this->getCsrfToken()
+	) throw new AuthException("CSRF authorization failed.");
+
 
 	if ($_REQUEST['ajax_id']) {
 		$this->ajax_id = pcl_ident($_REQUEST['ajax_id']);
 		$this->header['get'] = 1;
 	}
 
-	//get values
-	$this->submitted = ifnot($_REQUEST['pcl_form_submit'], true);
-	$this->values = $this->header['get']? $_GET['data'] : $_POST['data'];
-
-	if ($this->header['csrf']
-		and $_REQUEST['csrf_token'] != $this->getCsrfToken()
-	) throw new AuthException("CSRF authorisation failed.");
-
-	//set input file names
-	foreach ((array)$_FILES as $id => $aFile) {
-		if($this->elements[$id]['file'] and $aFile['size']) {
-			$this->values[$id] = $aFile['name'];
-		}
-	}
-	//set empty checkbox values, call onsave, apply formating
-	foreach ($this->elements as $id=>$elem) {
-		$value = $this->values[$id];
-		if ($elem['type'] == 'check' and !$value and !$elem['noprint']) $this->values[$id] = array();
-		elseif($elem['type'] == 'input') $this->values[$id] = trim($value);
-		if ($elem['onsave']) $this->values[$id] = $this->fireEventElem('onsave',$id,'',$value);
-
-		if ($fmt = $this->getAttr($id, 'format')) $this->values[$id] = $this->formatStr($value, $fmt);
-	}
+	$this->values = $this->getHttpData();
 
 	$this->saveSession();
 }
 
 protected function getValidator()
 {
-	if (!$this->validator) $this->validator = new FormValidator($this->config);
+	if (!$this->validator) {
+		$valid = new Validator;
+		$valid->skipUndefined = true;
+		$valid->skipUndefinedRule = true;
+		$valid->dateTimeFormat = $this->config['pclib.locale']['date'];
+		$valid->onValidateElement[] = array($this, 'validateElementCallback');
+		$this->validator = $valid;
+	}
+
 	return $this->validator;
 }
 
@@ -139,19 +163,38 @@ protected function _out($block = null)
 function validate()
 {
 	$this->invalid = array();
-
-	foreach ($this->elements as $id => $elem) {
-		if (!$this->isEditable($id)) continue;
-
-		$elem['value'] = $this->values[$id];
-
-		$errormsg = $this->validateElement($elem);
-		if ($errormsg) $this->invalid[$id] = $errormsg;
-	}
-
+	$this->getValidator()->validateArray($this->values, $this->elements);
+	$this->invalid = $this->getValidator()->getErrors();
+	$this->onValidate();
 	$this->saveSession();
 
 	return !(bool)$this->invalid;
+}
+
+//skip non-editable fields
+protected function validateElementCallback($event)
+{
+	$elem = $event->data[1];
+	$id = $elem['id'];
+
+	if (!$this->isEditable($id)) {
+		$event->propagate = false;
+		$event->result = true;
+		return;
+	}
+
+	if (isset($elem['onvalidate'])) {
+		$value = $this->values[$id];
+
+		$errorMsg = call_user_func($elem['onvalidate'], $this, $id, null, $value);
+		if ($errorMsg) {
+			$event->sender->setError($elem['id'], $errorMsg, array($id, $value, $rule, $param));
+
+			$event->propagate = false;
+			$event->result = false;
+		}
+	}
+
 }
 
 /**
@@ -188,74 +231,52 @@ function saveSession()
 **/
 function isEditable($id, $testAttr = true)
 {
-	$editables = array ('input', 'check', 'radio', 'text', 'select', 'listinput');
 	$elem = $this->elements[$id];
 	if (!$elem) return false;
-	if (!in_array($elem['type'], $editables)) return false;
+	if (!in_array($elem['type'], $this->editables)) return false;
 	if ($testAttr and ($this->getAttr($id, 'noprint') or $this->getAttr($id, 'noedit'))) return false;
 	return true;
 }
 
 /**
- * Build default form template.
- * @see tpl::create()
+ * Use default template for displaying database table content.
  */
-function create($dsstr, $fileName = null, $template = null)
+function create($tableName)
 {
-	$this->service('db');
-	$trans = array('<:' => '<', ':>' => '>', '{:' => '{', ':}' => '}');
-	if (!$template) $template = PCLIB_DIR.'assets/def_form.tpl';
-
-	$table = $this->db->tableName($dsstr);
-	$columns = $this->db->columns($table);
-
-	$fields = $this->getFields($dsstr);
-	foreach($fields as $id) {
-		if ($columns[$id]['autoinc']) continue;
-		$elem .= $this->columnToElementStr($columns[$id]);
-		$body[] = array(
-		'LABEL' => '{'.$id.'.lb}',
-		'FIELD' => '{'.$id.'}',
-		'ERR' => '{'.$id.'.err}',
-		);
-	}
-
-	$t = new Tpl($template);
-	$t->values['NAME'] = $table;
-	$t->values['BODY'] = $body;
-	$t->values['ELEMENTS'] = trim($elem);
-	$html = strtr($t->html(), $trans);
-
-	if ($fileName) {
-		$ok = file_put_contents($fileName, $html);
-		if (!$ok) throw new IOException("Cannot write file $fileName.");
-		else @chmod($fileName, 0666);
-	}
-	else {
-		$this->loadString($html);
-		$this->init();
-	}
+	$this->createFromTable($tableName, PCLIB_DIR.'assets/default-form.tpl');
 }
 
-/** Return element for table column. Helper for create(). */
-private function columnToElementStr(array $col)
+/**
+ * Return sanitized _POST (_GET) data.
+ * @return array $data
+ **/
+protected function getHttpData()
 {
-	$type = 'input';
+	$data = $this->header['get']? $_GET['data'] : $_POST['data'];
 
-	$size = ($col['size'] > 50)? '50/'.$col['size'] : $col['size'];
-	if ($col['type'] == 'string' and $col['size'] > 255) { $type = 'text'; $size = null; }
-	if ($col['type'] == 'bool') { $type = 'check'; $size = null; }
+	$preventMass = $this->config['pclib.security']['form-prevent-mass'];
+	if ($preventMass) {
+		$data = array_intersect_key($data, $this->elements);
+	}
 
-	if ($col['type'] == 'int' or $col['type'] == 'float') $size = '6/30';
-	if ($col['type'] == 'date') $size = ($col['size']>1)? '20/30' : '10/30';
+	foreach ($this->elements as $id => $elem) {
 
-	$lb = ifnot($col['comment'], $col['name']);
-	$s = $type.' '.$col['name'].' lb "'.$lb.'"';
-	if ($size) $s .= " size \"$size\"";
-	if ($col['type'] == 'date') $s .= ' date';
-	if (stripos('-'.$col['name'], 'MAIL')) $s .= ' email';
-	if (!$col['nullable']) $s .= ' required';
-	return $s."\n";
+		if ($preventMass and !in_array($elem['type'], $this->editables)) {
+			unset($data[$id]);
+			continue;
+		}
+
+		if ($elem['type'] == 'check' and !$data[$id] and !$elem['noprint']) $data[$id] = array();
+		elseif($elem['type'] == 'input' and is_string($data[$id])) $data[$id] = trim($data[$id]);
+	}
+
+	foreach ((array)$_FILES as $id => $aFile) {
+		if($this->elements[$id]['file'] and $aFile['size']) {
+			if (is_string($aFile['name'])) $data[$id] = $aFile['name'];
+		}
+	}
+
+	return $data;
 }
 
 /** 
@@ -435,7 +456,7 @@ function print_Errors()
 	if (!$this->invalid) return;
 	print "<div class=\"error-messages\">";
 	foreach($this->invalid as $id => $message) {
-		$lb = ifnot($this->elements[$id]['lb'], $id);
+		$lb = $this->elements[$id]['lb'] ?: $id;
 		print "<div>$lb $message</div>";
 	}
 	print "</div>";
@@ -443,29 +464,30 @@ function print_Errors()
 
 /**
  * Print all form elements at once.
- * Uses simple table layout from presentation.
+ * Uses simple table layout for presentation.
  * Implement {form.fields} placeholder.
  * @copydoc tag-handler
  */
 function print_Class($id, $sub, $value)
 {
-	parent::print_Class($id, 'fields', $value);
+	if ($id != $this->className) return;
+	$printFunc = ($this->header['default_print'] == 'div')? 'divPrintElement' : 'trPrintElement';
 
-	$fields = $this->getFields();
-	print "<tr><td colspan=\"3\">";
-	foreach($fields as $id) {
-		$elem = $this->elements[$id];
+	$this->eachPrintable(array($this, $printFunc), $sub);		
+
+	print ($printFunc == 'trPrintElement')? "<tr><td colspan=\"3\">" : '<div class="form-group buttons">';
+	foreach($this->elements as $id => $elem) {
 		if ($elem['noprint'] or $elem['skip'] or $elem['type'] != 'button') continue;
 		$this->print_Button($id, '', $this->getValue($id));
 		print ' ';
 	}
-	print '</td></tr>';
+	print ($printFunc == 'trPrintElement')? '</td></tr>' : '</div>';
 }
 
 /** Helper for print_class() */
-protected function print_Class_Item($id, $sub)
+protected function trPrintElement($elem)
 {
-	$elem = $this->elements[$id];
+	$id = $elem['id'];
 	if ($elem['hidden']) return;
 	print "<tr><td class=\"$id\">";
 	$this->print_Element($id, 'lb', null);
@@ -476,6 +498,21 @@ protected function print_Class_Item($id, $sub)
 	print '</td><td>';
 	$this->print_Element($id, 'err', null);
 	print '</td></tr>';
+}
+
+/** Helper for print_class() */
+protected function divPrintElement($elem)
+{
+	$id = $elem['id'];
+	if ($elem['hidden']) return;
+	print "<div class=\"form-group\">";
+	$this->print_Element($id, 'lb', null);
+	$value = $this->getValue($id);
+	if (!$this->fireEventElem('onprint',$id, '', $value)) {
+		$this->print_Element($id, '', $value);
+	}
+	$this->print_Element($id, 'err', null);
+	print '</div>';
 }
 
 /**
@@ -517,7 +554,13 @@ function print_Input($id, $sub, $value)
 	if ($elem['password']) $type = 'password';
 	elseif($elem['file'])  {
 		$type = 'file';
-		$tag['name'] = $tag['id'];
+		if ($elem['multiple']) {
+			$tag['name'] = $tag['id'].'[]';
+			$tag['multiple'] = 1;
+		}
+		else {
+			$tag['name'] = $tag['id'];
+		}
 	}
 	elseif($elem['hidden']) {
 		$type = 'hidden';
@@ -577,7 +620,7 @@ function print_Button($id, $sub, $value)
 {
 	$elem = $this->elements[$id];
 	$url = $this->getUrl($elem);
-	$onclick = ifnot($elem['onclick'], $elem['html']['onclick']);
+	$onclick = $elem['onclick'] ?: $elem['html']['onclick'];
 	$tagname = $this->useButtonTag? 'button':'input';
 	if ($elem['tag']) $tagname = $elem['tag'];
 
@@ -600,10 +643,15 @@ function print_Button($id, $sub, $value)
 		 $tag['value'] = isset($elem['lb'])? $this->escape($elem['lb']) : $id;
 	}
 
-	if ($url and $elem['popup'])
+	if ($elem['confirm']) {
+		$onclick = "if(!confirm('".$elem['confirm']."')) return false;";
+	}
+	elseif ($url and $elem['popup']) {
 		$onclick = $this->getPopup($id, $elem['popup'], $url);
-	elseif ($url)
+	}
+	elseif ($url) {
 		$onclick = "window.location='$url';";
+	}
 
 	$tag['onclick'] = $onclick;
 	print $this->htmlTag($tagname, $tag, $content);
@@ -650,7 +698,7 @@ function print_Checkbox($id, $sub, $value, $i = null)
 {
 	$elem  = $this->elements[$id];
 	$cbid = $sub? $sub : 1;
-	$tag = $this->getTag($id, isset($elem['items']));
+	$tag = $this->getTag($id, $elem['items']);
 	$tag['type'] = 'checkbox';
 	$tag['checked'] = in_array($cbid, $value)? 'checked' : null;
 	$tag['value'] = $cbid;
@@ -674,7 +722,7 @@ function print_Radio($id, $sub, $value, $i = null)
 {
 	$elem  = $this->elements[$id];
 	$cbid = $sub? $sub : 1;
-	$tag = $this->getTag($id, isset($elem['items']));
+	$tag = $this->getTag($id, $elem['items']);
 	$tag['type'] = 'radio';
 	$tag['checked'] = ($cbid == $value)? 'checked' : null;
 	$tag['value'] = $cbid;
@@ -708,7 +756,7 @@ function print_ListInput($id, $sub, $value)
 
 	$html .= "<datalist id=\"dl_$tag[id]\">";
 	foreach ($items as $i => $item) {
-		$html .= "<option label=\"$i\" value=\"$item\">";
+		$html .= "<option value=\"$item\">";
 	}
 	$html .= "</datalist>";
 
@@ -725,7 +773,7 @@ function print_Select($id, $sub, $value)
 	$items = $this->getItems($id);
 	$tag   = $this->getTag($id);
 
-	$emptylb = ifnot($elem['emptylb'], ' - Choose - ');
+	$emptylb = $elem['emptylb'] ?: ' - Choose - ';
 
 	$options = array();
 	$html = $elem['noemptylb']? '':'<option value="">'.$this->t($emptylb).'</option>';
@@ -752,56 +800,30 @@ function print_Select($id, $sub, $value)
 }
 
 /**
- * Validate $element - return error message if invalid.
- * You can redefine this in descendant and add your own validation rules.
- * @param array $elem
- * @return string error message or empty string if ok.
- * @see validate()
- */
-protected function validateElement(array $elem)
-{
-	$event = $this->onValidate($elem);
-	if ($event and !$event->propagate) return $event->result;
-
-	$id = $elem['id'];
-	$value = $this->toString($this->values[$id]);
-
-	$validate = $this->getValidator();
-	if (!$elem['required'] and $validate->isEmpty($value)) return '';
-
-	foreach($validate->rules as $rule) {
-		if ($elem[$rule] and !$validate->$rule($value, $elem[$rule])) {
-			return $this->t($validate->getMessage($rule));
-		}
-	}
-
-	if ($elem['onvalidate'])
-		return $this->fireEventElem('onvalidate',$id,'',$value);
-
-	return '';
-}
-
-/**
  * Prepare form values for storing into database.
  * Convert date, number, remove unwanted fields etc.
  * @param bool $skipEmpty Remove empty fields?
+ * @return array $values
  */
-function prepare($skipEmpty = false)
+function preparedValues($skipEmpty = false)
 {
-	if (!$this->values) return;
+	if (!$this->values) return array();
+
+	$values = array();
 	foreach ($this->values as $id=>$value) {
 		$elem = $this->elements[$id];
 		if ($id == '' or ($value == '' and $skipEmpty)
 		or $this->getAttr($id, 'nosave')
 		/*or $elem['noprint']*/) {
-			unset($this->values[$id]);
 			continue;
 		}
 
-		if ($this->elements[$id]['file'] and !$this->values[$id]) {
-			unset($this->values[$id]);
+		if ($this->elements[$id]['file'] and (!$this->values[$id] or $this->hasExtraSave($id))) {
 			continue;
 		}
+
+		if ($fmt = $this->getAttr($id, 'format')) 
+			$value = $this->formatStr($value, $fmt);
 
 		if ($elem['date'])
 			$value = $this->toSqlDate($value, $elem['date']);
@@ -810,23 +832,55 @@ function prepare($skipEmpty = false)
 			$value = $this->toNumber($value);
 
 		if (is_array($value)) $value = $this->toBitField($value);
-		$this->values[$id] = $value;
+
+		if ($elem['onsave']) 
+			$value = $this->fireEventElem('onsave', $id, '', $value);
+
+		$values[$id] = $value;
 	}
-	$this->prepared = true;
+
+	return $values;
 }
 
-/**
- * Upload form files.
- * @param array $old List of previous versions of files - will be deleted
- */
-function upload($old = array())
+private function getTableName($tab)
 {
-	$event = $this->onUpload($_FILES, $old);
-	if ($event and !$event->propagate) return;
+	$tableName = $this->header['table'] ?: $tab;
+	if ($tab and $tab != $tableName) {
+		throw new Exception('Database table name mismatch.');
+	}
+	return $tableName;
+}
 
+protected function uploadFs($tableName, $id)
+{
+	$fs = $this->fileStorage;
+	$files = array();
+
+	foreach ($fs->postedFiles() as $file) {
+		$elem = $this->elements[$file['INPUT_ID']];
+		if (!$elem or $elem['nosave']) continue;
+
+		$entity = $elem['entity'] ?: $tableName;
+
+		$file['PREFIX'] = $elem['prefix'] ?: strtolower($entity).'_';
+		$files[] = $file;
+	}
+
+	$fs->save(array($id, $entity), $files);
+
+	$errors = $fs->getUploadErrors();
+	if ($errors) {
+		$this->invalid += $errors;
+	}
+}
+
+protected function uploadBasic($old = array())
+{
 	foreach ($_FILES as $id => $aFile) {
 		$elem = $this->elements[$id];
+		if (!$elem) continue;
 		if ($aFile['error']) $this->invalid[$id] = 'Upload error ('.$aFile['error'].')';
+
 		if ($elem['nosave'] or !$aFile['size'] or $aFile['error']) continue;
 		if ($this->fileInBlackList($this->values[$id])) throw new RuntimeException("Illegal file type.");
 		if (!$elem['into']) throw new NoValueException("Missing 'into \"directory\"' attribute for input file.");
@@ -839,6 +893,23 @@ function upload($old = array())
 		if (!$ok) throw new IOException("Cannot upload file $path/$filename (permissions problem?)");
 		@chmod($path.'/'.$filename, 0666);
 		$this->values[$id] = $filename;
+	}	
+}
+
+/**
+ * Upload form files.
+ * @param array $old List of previous versions of files - will be deleted
+ */
+function upload($tableName, $id, $old = array())
+{
+	$event = $this->onUpload($_FILES, $old);
+	if ($event and !$event->propagate) return;
+
+	if ($this->fileStorage) {
+		$this->uploadFs($tableName, $id);
+	}
+	else {
+		$this->uploadBasic($old);
 	}
 }
 
@@ -849,16 +920,16 @@ function upload($old = array())
  * @param string $tab database table name
  * @return int $inserted_id
  */
-function insert($tab = null)
+function insert($tab)
 {
+	$tab = $this->getTableName($tab);
 	$event = $this->onSave('insert', $tab);
 	if ($event and !$event->propagate) return;
 
 	$this->service('db');
 
-	if (count($_FILES)) $this->upload();
-	if (!$this->prepared) $this->prepare(1);
-	$id = $this->db->insert($tab, $this->values);
+	$id = $this->db->insert($tab, $this->preparedValues(true));
+	if (count($_FILES)) $this->upload($tab, $id);
 	return $id;
 }
 
@@ -870,6 +941,7 @@ function insert($tab = null)
  */
 function update($tab, $cond)
 {
+	$tab = $this->getTableName($tab);
 	$event = $this->onSave('update', $tab, $cond);
 	if ($event and !$event->propagate) return;
 
@@ -878,13 +950,16 @@ function update($tab, $cond)
 	$params = (func_num_args() > 2)? array_slice(func_get_args(),2) : null;
 	if ($params and is_array($params[0])) $params = $params[0];
 
-	if (count($_FILES)) {
-		$old = $this->db->select($tab, $cond, $params);
-		$this->upload($old);
+	$old = $this->db->select($tab, $cond, $params);
+	if (!$old) {
+		throw new Exception('Record not found.');
 	}
 
-	if (!$this->prepared) $this->prepare();
-	$this->db->update($tab, $this->values, $cond, $params);
+	if (count($_FILES)) {
+		$this->upload($tab, $old['ID'] ?: $old['id'], $old);
+	}
+
+	$this->db->update($tab, $this->preparedValues(), $cond, $params);
 }
 
 /**
@@ -895,6 +970,7 @@ function update($tab, $cond)
  */
 function delete($tab, $cond)
 {
+	$tab = $this->getTableName($tab);
 	$event = $this->onDelete('delete', $tab, $cond);
 	if ($event and !$event->propagate) return;
 
@@ -904,15 +980,26 @@ function delete($tab, $cond)
 	if ($params and is_array($params[0])) $params = $params[0];
 
 	$data = $this->db->select($tab, $cond, $params);
-
-	foreach ($this->elements as $id=>$elem)
-		if ($elem['file'] and $elem['into']) {
-			 $path = realpath($this->elements[$id]['into']);
-			 if (!$data[$id]) continue;
-			 @unlink($path.'/'.$data[$id]);
-		}
-
 	$this->db->delete($tab, $cond, $params);
+
+	if ($this->header['fileupload']) {
+		$this->deleteFiles($tab, $data);
+	}
+}
+
+protected function deleteFiles($tableName, $data)
+{
+	if ($this->fileStorage) {
+		$this->fileStorage->deleteEntity(array($data['ID'] ?: $data['id'], $tableName));
+	}
+	else {
+		foreach ($this->elements as $id=>$elem) {
+			if (!$elem['file'] or !$elem['into']) continue;
+			$path = realpath($this->elements[$id]['into']);
+			if (!$data[$id]) continue;
+			@unlink($path.'/'.$data[$id]);
+		}
+	}
 }
 
 /**
@@ -922,14 +1009,13 @@ function delete($tab, $cond)
  */
 function content()
 {
-	if (!$this->values) return;
+	if (!$this->values) return array();
 	$content = array();
 
 	foreach ($this->values as $id=>$value) {
 		$elem = $this->elements[$id];
 		if ($elem['lb'] == '') continue;
-		if (is_array($value)) $value = implode(',', $value);
-		if ($elem['noprint']) continue;
+		if ($this->getAttr($elem['id'], 'noprint') or $elem['hidden']) continue;
 		if ($value == '') {
 			$content[$elem['lb']] = $elem['emptylb'];
 			continue;
@@ -942,10 +1028,16 @@ function content()
 		elseif ($elem['type'] == 'check') {
 			$value = $this->getValue($id);
 			$items = $this->getItems($id, true);
-			foreach($items as $i => $label) {
-				if (in_array($i,$value)) $labels[] = $label;
+			if ($items) {
+				$labels = array();
+				foreach($items as $i => $label) {
+					if (in_array($i,$value)) $labels[] = $label;
+				}
+				$value = implode(', ', $labels);
 			}
-			$value = implode(', ', $labels);
+			else {
+				$value = $this->t($value[0]? 'yes' : 'no');
+			}
 		}
 
 		$content[$elem['lb']] = $value;
@@ -965,7 +1057,7 @@ function mailTo($to, $subj, $intro='', $hdr='')
 {
 	$msg = "$intro\n";
 	foreach ($this->content() as $lb => $value) {
-		$msg .= str_pad($lb, 20) . $value .EOL;
+		$msg .= str_pad($lb, 20) . $value ."\n";
 	}
 
 	mail($to, $subj, $msg, $hdr);
@@ -1017,9 +1109,10 @@ function ajaxSync($elemList = null)
 function dbSync($tab)
 {
 	$columns = $this->service('db')->columns($tab);
+	if (!$columns) throw new Exception("Database table '$tab' not found.");
 	foreach($this->elements as $id => $el) {
 		if (!$this->isEditable($id)) continue;
-		if (!$columns[$id]) {
+		if (!$columns[$id] and !$this->hasExtraSave($id)) {
 			$this->elements[$id]['nosave'] = 1;
 			continue;
 		}
@@ -1032,24 +1125,15 @@ function dbSync($tab)
 	}
 }
 
-protected function parseLine($line)
+//Has field extra storage for saving?
+protected function hasExtraSave($id)
 {
-	$id = parent::parseLine($line);
-	$elem = $this->elements[$id];
-	if ($elem['hidden']) $this->hidden[$id] = $id;
-	if ($elem['file'] and $elem['type'] == 'input')
-		$this->elements[$this->className]['fileupload'] = 1;
-	if ($elem['ajaxget']) $this->elements[$this->className]['ajax'] = 1;
-	if (strpos($elem['size'],'/')) {
-		list($sz,$ml) = explode('/',$elem['size']);
-		$this->elements[$id]['size'] = $sz;
-		$this->elements[$id]['maxlength'] = $ml;
-	}
-	if ($elem['type'] == 'check' and $elem['default']) {
-		$this->elements[$id]['default'] = explode(',', $elem['default']);
-	}
+	return ($this->elements[$id]['file'] and $this->fileStorage);
+}
 
-	return $id;
+function addHidden($name, $value)
+{
+	$this->extraHidden[$name] = $value;
 }
 
 //submit disabled elements too (add hidden field for disabled element)
@@ -1072,27 +1156,26 @@ protected function ieFix($id, $name, $value)
  */
 protected function fileName($id)
 {
-	$path = realpath($this->elements[$id]['into']);
-	$format = $this->elements[$id]['rename'];
-	$maxlength = $this->elements[$id]['maxlength'];
+	//$format = $this->elements[$id]['rename'];
+	$elem = $this->elements[$id];
 
-	$filename = $this->values[$id];
-	if ($maxlength) {
-		$ext   = extractpath($filename, '.%e');
-		$bname = extractpath($filename, '%f');
-		if (utf8_strlen($ext) > 6) {$bname .= $ext; $ext = '';} //sanity check
-		$filename = utf8_substr($bname,0,$maxlength-utf8_strlen($ext)).$ext;
+	$fileName = $this->values[$id];
+	$baseName = extractPath($fileName, '%f');
+	$ext = extractPath($fileName, '.%e');
+
+	if (utf8_strlen($ext) > 6) {
+		$baseName .= $ext; 
+		$ext = '';
 	}
 
-	$i = 1; $fn = $filename;
-	while (file_exists($path.'/'.$filename)) {
-		if ($maxlength)
-			$filename = substr(extractpath($fn,'%f'),0,-strlen($i)).($i++).extractpath($fn,'.%e');
-		else
-			$filename = extractpath($fn,'%f').($i++).extractpath($fn,'.%e');
+	$baseName = substr(mkident($baseName, '-'), 0, 80);
+
+	while (true) {
+		$fileName = $baseName.'-'.randomstr(8).$ext;
+		if (!file_exists(realpath($elem['path']).'/'.$fileName)) break;
 	}
 
-	return $filename;
+	return $fileName;
 }
 
 
@@ -1107,7 +1190,7 @@ protected function toSqlDate($dtstr, $fmtstr = '')
 	preg_match_all("/%(.)/", $fmtstr, $fmt, PREG_PATTERN_ORDER);
 	$fmt = $fmt[1];
 
-	$oDT = new stdClass;
+	$oDT = new \stdClass;
 	$oDT->d = $oDT->m = $oDT->H = $oDT->M = $oDT->S = '00'; $oDT->Y = '0000';
 
 	while ($fmtpart = array_shift($fmt)) {
@@ -1134,7 +1217,7 @@ protected function toBitField(array $bitArray)
 	$value = 0;
 	foreach ($bitArray as $bit) {
 		$bit = (integer) $bit;
-		if ($bit > 64 or $bit < 1) throw new OutOfBoundsException('Checkbox index out of bounds.');
+		if ($bit > 64 or $bit < 1) throw new \OutOfBoundsException('Checkbox index out of bounds.');
 		$value += pow (2, $bit - 1);
 	}
 	return $value;
@@ -1183,17 +1266,17 @@ protected function head()
 	if ($action) $tag['action'] = $this->header['action'] = $action;
 
 	if ($jsvalid = $this->header['jsvalid']) {
-		 $strict = ($jsvalid == "nostrict") ? 'false':'true';
-		 $tag['onsubmit'] = "return pclib.validate(this,$strict);";
+		 $tag['onsubmit'] = "return pclib.validate(this);";
 		 $hidden['pclib_jsvalid'] = $this->getValidationString();
 	}
 
 	if ($this->header['fileupload']) $tag['enctype'] = 'multipart/form-data';
 
-	$html = $this->htmlTag('form', $tag, null, true).EOL;
+	$html = $this->htmlTag('form', $tag, null, true)."\n";
 
-	foreach ((array)$hidden as $k => $v) {
-		$html .= "<input type=\"hidden\" name=\"$k\" value=\"$v\"".($this->useXhtml? ' />' : '>').EOL;
+	$hidden = (array)$hidden + $this->extraHidden; 
+	foreach ($hidden as $k => $v) {
+		$html .= "<input type=\"hidden\" name=\"$k\" value=\"$v\"".($this->useXhtml? ' />' : '>')."\n";
 	}
 
 	return $html;
@@ -1218,7 +1301,7 @@ protected function foot()
 
 private function getCsrfToken()
 {
-	if (!session_id()) throw new RuntimeException('Session is required.');
+	if (!session_id()) return '';
 	$token = $this->app->getSession('pclib.csrf_token');
 	if (!$token) {
 		$token = randomstr(10);
@@ -1275,7 +1358,7 @@ private function getValidationString()
 			case 'file': $options = strtr($options, array('.' => '\.', '*' => '.*', '?' => '.')); break;
 		}
 
-		$lb = ifnot(strip_tags(strtr($elem['lb'],'"|',"'/")), $id);
+		$lb = strip_tags(strtr($elem['lb'],'"|',"'/")) ?: $id;
 
 		$output[] = "$id|$lb|$required|$rule|$options";
 	}
@@ -1283,139 +1366,6 @@ private function getValidationString()
 	return implode('|',$output);
 }
 
-} // end class
-
-/**
- * Form validation rules.
- */
-class FormValidator
-{
-public $rules = array('required','date','email','number','password','file','pattern');
-
-public $messages = array(
-	'required' => 'Field is required!',
-	'date'     => 'Bad date format!',
-	'email'    => 'Bad email address!',
-	'number'   => 'Not a number!',
-	'password' => 'Invalid password!',
-	'file'     => 'Bad file type!',
-	'pattern'  => 'Invalid value!',
-);
-
-public $config;
-
-const PATTERN_EMAIL = '/^[_\w\.\-]+@[\w\.-]+\.[a-z]{2,6}$/';
-
-function __construct(array $config)
-{
-	$this->config = $config;
 }
-
-function getMessage($rule)
-{
-	return $this->messages[$rule];
-}
-
-/**
- * Validate required field.
- * @copydoc valid-rule
- */
-function required($value)
-{
-	return !$this->isEmpty($value);
-}
-
-function isEmpty($value)
-{
-	return is_array($value)? (count($value)==0) : (strlen($value)==0);
-}
-
-/**
- * Validate proper email address.
- * @copydoc valid-rule
- */
-function email($value)
-{
-	return preg_match(self::PATTERN_EMAIL, $value);
-}
-
-/**
- * Validate regexp.
- * @copydoc valid-rule
- */
-function pattern($value, $pattern)
-{
-	return preg_match('/^'.$pattern.'$/', $value);
-}
-
-/**
- * Validate number.
- * @copydoc valid-rule
- */
-function number($value, $options)
-{
-	if ($options != 'strict') return true;
-	return is_numeric($value);
-}
-
-/**
- * Validate password. You can set minlength and characters required in password
- * with extcharset attribute.
- * @copydoc valid-rule
- */
-function password($value, $options)
-{
-	if ($options == 1) $options = '8,0';
-	list($minlen,$xchars) = explode(',', $options);
-	if ($minlen and (utf8_strlen($value) < $minlen)) return false;
-	if ($xchars and ctype_alnum($value)) return false;
-	return true;
-}
-
-function parseDate($datestr, $format)
-{
-	$fmtspec = array('d','m','Y','H','M','S');
-	$d = preg_split("/[^0-9]+/", $datestr, null, PREG_SPLIT_NO_EMPTY);
-	$f = array_flip(preg_split("/[^a-z]+/i", $format, null, PREG_SPLIT_NO_EMPTY));
-	$datearray = array();
-	foreach($fmtspec as $i) {
-		$datearray[] = isset($f[$i])? $d[$f[$i]] : strftime("%$i");
-	}
-	return $datearray;
-}
-
-/**
- * Validate date against fmt. Default format is '%d.%m.%Y'.
- * @copydoc valid-rule
- */
-function date($value, $options)
-{
-	if ($options == 1) $options = $this->config['pclib.locale']['date'];
-	list($d,$m,$y,$h,$i,$s) = $this->parseDate($value, $options);
-	if (!checkdate($m,$d,$y)) return false;
-	if (!$this->checkTime($h,$i,$s)) return false;
-	return true;
-}
-
-function checkTime($h, $i, $s)
-{
-	return ($h<24 and $i<60 and $s<60);
-}
-
-/**
- * Validate filename.
- * @copydoc valid-rule
- */
-function file($value, $options)
-{
-	if ($options == 1) $options = '*';
-	$wildcards = explode(';', $options);
-	foreach ($wildcards as $wildcard) {
-		if (fnmatch($wildcard, $value)) return true;
-	}
-	return false;
-}
-
-} //class FormValidator
 
 ?>

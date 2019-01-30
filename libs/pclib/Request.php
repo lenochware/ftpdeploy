@@ -12,11 +12,14 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
+namespace pclib;
+use pclib;
+
 /**
  * Provides unified access to HTTP request.
  * Can detect request method, url, user agent, request headers and such.
  */
-class Request extends BaseObject implements IService
+class Request extends system\BaseObject implements IService
 {
 
 protected $userAgents = array('Chrome', 'Safari', 'Konqueror', 'Opera', 'Firefox', 'Netscape', 'MSIE');
@@ -54,8 +57,19 @@ function getUrl()
 	return sprintf("%s%s%s", $scheme, $_SERVER['HTTP_HOST'], $_SERVER['REQUEST_URI']);
 }
 
-/** Return client IP address. */
-function getRemoteIp()
+/** Return root Url. */
+function getRootUrl()
+{
+	$scheme = $this->isSSL()? 'https://' : 'http://';
+	return sprintf("%s%s%s", $scheme, $_SERVER['HTTP_HOST'], $this->getBaseUrl());	
+}
+
+
+/** 
+ * Return client IP address. 
+ * Warning: Can be faked!
+ */
+function getClientIp()
 {
 	if ($_SERVER['HTTP_CLIENT_IP'])
 		$ip = $_SERVER['HTTP_CLIENT_IP'];
@@ -63,11 +77,22 @@ function getRemoteIp()
 		$ip = $_SERVER['HTTP_X_FORWARDED_FOR'];
 	else if($_SERVER['REMOTE_ADDR'])
 		$ip = $_SERVER['REMOTE_ADDR'];
-	else $ip = '127.0.0.1';
+	else $ip = '0.0.0.0';
 
 	if (strpos($ip,',')) $ip = substr($ip,0,strpos($ip,','));
 
 	return $ip;
+}
+
+/** Return server IP address (safe). */
+function getServerIp()
+{
+	return array_key_exists('SERVER_ADDR',$_SERVER) ? $_SERVER['SERVER_ADDR'] : $_SERVER['LOCAL_ADDR'];
+}
+
+function isConsole()
+{
+	return (php_sapi_name() == "cli");
 }
 
 /** Return base Url. */

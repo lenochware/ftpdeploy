@@ -12,6 +12,9 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
+namespace pclib;
+use pclib;
+
 /**
  * Load tree structure and render it as unordered list (ul).
  * Features:
@@ -21,7 +24,7 @@
  * - Tweak formatting of html output
  */
 
-class Tree extends BaseObject
+class Tree extends system\BaseObject
 {
 
 /** var Db Link to database object. */
@@ -44,8 +47,8 @@ public $table = 'TREE_LOOKUPS';
 
 public $cssClass;
 
-/** var App */
-protected $app;
+/** var Router */
+protected $router;
 
 private $id;
 private $name;
@@ -64,11 +67,31 @@ public $LEVEL_SEPAR = '/';
  */
 function __construct($cssClass = 'pctree')
 {
-	global $pclib;
 	parent::__construct();
 	$this->cssClass = $cssClass;
-	$this->app = $pclib->app;
 	$this->service('db');
+}
+
+/**
+ * Return current index to Tree::nodes array.
+ */
+protected function currentIndex()
+{
+	return $this->i;
+}
+
+/**
+ * Generate HTML for list open tag - UL.
+ */
+protected function htmlListBegin($level)
+{
+		if ($this->i == 0) {
+		$html = "<ul class=\"$this->cssClass\"";
+		$html .= $this->name? " id=\"$this->name\">" : '>';
+	}
+	else $html = '<ul>';
+
+	return $html;
 }
 
 /**
@@ -79,11 +102,7 @@ function __construct($cssClass = 'pctree')
  */
 protected function htmlTree($level = 0)
 {
-	if ($this->i == 0) {
-		$html = "<ul class=\"$this->cssClass\"";
-		$html .= $this->name? " id=\"$this->name\">" : '>';
-	}
-	else $html = '<ul>';
+	$html = $this->htmlListBegin($level);
 
 	while($node = $this->nodes[$this->i++]) {
 		
@@ -104,7 +123,7 @@ protected function htmlTree($level = 0)
 		}
 		else {
 			if ($this->nodes[$this->i]['LEVEL'] > $node['LEVEL']) $node['HASCHILD'] = true;
-			$html .= $this->htmlNode($node);
+			$html .= $this->htmlListNode($node);
 		}
 	}
 	$html .= "</ul>";
@@ -119,20 +138,20 @@ private function skipInactive($inactiveNode)
 }
 
 /**
- * Generate HTML for %tree node. Override for own %tree drawing alg.
- * Tree::pattern and Tree::pattern_link is used for drawing
+ * Generate HTML for %tree node - LI.
+ * Tree::pattern and Tree::pattern_link are used for drawing.
  * @param array $node Tree node (must contain LABEL, LEVEL)
  * @return string $html Node html code
  * @see htmltree()
  */
-protected function htmlNode($node)
+protected function htmlListNode($node)
 {
 	$class = $node['HASCHILD']? ($node['EXPANDED']? 'folder open' : 'folder closed') : 'item';
 	$class = trim($node['CLASS'].' '.$class);
 	if ($class) $node['ATTR'] = trim($node['ATTR']." class=\"$class\"");
 	if (!$node['ID']) $node['ID'] = $this->i;
 	if ($node['ROUTE']) {
-		$node['URL'] = $this->app->getUrl($node['ROUTE']);
+		$node['URL'] = $this->service('router')->createUrl($node['ROUTE']);
 	}
 
 	$this->service('translator', false);
@@ -190,7 +209,7 @@ function load($fileName)
 function setString($str)
 {
 	$nodes = array();
-	$lines = explode(EOL, $str);
+	$lines = explode("\n", $str);
 	$cells = explode($this->CELL_SEPAR, trim(array_shift($lines)));
 	foreach ($lines as $line) {
 		$line = trim($line);
@@ -531,7 +550,7 @@ protected function expandPath($node_key)
 public function getNode($node_id)
 {
 	$node = $this->db->select($this->table, pri($node_id));
-	if (!$node) throw new Exception('Node '.$node_id.' not found.');
+	if (!$node) throw new \pclib\Exception('Node '.$node_id.' not found.');
 	return $node;
 }
 

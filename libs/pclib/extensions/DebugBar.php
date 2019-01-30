@@ -1,5 +1,8 @@
 <?php
 
+namespace pclib\extensions;
+use pclib\system\BaseObject;
+
 /**
  * Show DebugBar in your web-application.
  * Usually you enable debugbar by adding $app->debugMode = true; line into your
@@ -12,21 +15,34 @@ protected $app;
 
 protected $queryTime;
 protected $startTime;
+protected $queryTimeSum;
+
 protected $positionDefault = 'position:absolute;top:10px;right:10px;';
 
 protected $updating = false;
+public $registered = false;
 
-function __construct()
+private static $instance;
+
+private function __construct()
 {
 	global $pclib;
 	$this->app = $pclib->app;
 
 	//Use logger with independent db connection to avoid conflicts.
-	$this->logger = new Logger('debuglog');
-	$this->logger->storage = new LoggerDbStorage($this->logger);
+	$this->logger = new PCLogger('debuglog');
+	$this->logger->storage = new \pclib\system\storage\LoggerDbStorage($this->logger);
 	$this->logger->storage->db = clone $this->app->db;
 
-	$this->logUrl();
+	$this->logUrl();	
+}
+
+public static function getInstance()
+{
+  if (self::$instance === null) {
+      self::$instance = new self;
+  }
+  return self::$instance;
 }
 
 function addEvents($events)
@@ -37,31 +53,38 @@ function addEvents($events)
 	}
 }
 
-function register()
+public static function register()
 {
+	$that = self::getInstance();
+
+	if ($that->registered) return;
+
 	$events = array(
-		'App.onBeforeOut' => array($this, 'hook'),
-		'App.onBeforeRun' => array($this, 'hook'),
-		'App.onError' => array($this, 'hook'),
-		'Db.onBeforeQuery' => array($this, 'hook'),
-		'Db.onAfterQuery' => array($this, 'hook'),
-		//'Func.onLogDump' => array($this, 'onLogDump'),
+		'pclib\App.onBeforeOut' => array($that, 'hook'),
+		'pclib\App.onAfterOut' => array($that, 'hook'),
+		'pclib\App.onBeforeRun' => array($that, 'hook'),
+		'pclib\App.onError' => array($that, 'hook'),
+		'pclib\Db.onBeforeQuery' => array($that, 'hook'),
+		'pclib\Db.onAfterQuery' => array($that, 'hook'),
+		//'Func.onLogDump' => array($that, 'onLogDump'),
 	);
 
-	$this->addEvents($events);
+	$that->addEvents($events);
 	
-	$this->app->loadDefaults();
-	if ($this->app->db) {
-		$this->app->db->loadDefaults();
+	$that->app->loadDefaults();
+	if ($that->app->db) {
+		$that->app->db->loadDefaults();
 	}
 
-	$this->startTime = microtime(true);
+	$that->startTime = microtime(true);
+	$that->queryTimeSum = 0;
+	$that->registered = true;
 }
 
 function html()
 {
-	$t = new Tpl(PCLIB_DIR.'assets/debugbar.tpl');
-	$t->values['POSITION'] = ifnot($this->app->config['pclib.debugbar.position'], $this->positionDefault);
+	$t = new PCTpl(PCLIB_DIR.'assets/debugbar.tpl');
+	$t->values['POSITION'] = $this->app->config['pclib.debugbar.position'] ?: $this->positionDefault;
 	$t->values['VERSION'] = PCLIB_VERSION;
 	$t->values['TIME'] = $this->getTime($this->startTime);
 	$t->values['MEMORY'] = round(memory_get_peak_usage()/1048576,2);
@@ -71,6 +94,8 @@ function html()
 
 function hook($event)
 {
+	if(strpos($event->data[0], 'debuglog')) dump($this->updating,$event->data);
+
 	if ($this->updating) return;
 
 	$this->updating = true;
@@ -83,6 +108,14 @@ function onBeforeOut($event)
 {
 	$this->app->layout->values['CONTENT'] .= $this->html();
 }
+
+
+function onAfterOut($event)
+{
+	$message = "Time: ". $this->getTime($this->startTime).' ms, db: '.$this->queryTimeSum.' ms';
+	$this->logger->log('DEBUG', 'time', $message);
+}
+
 
 function onBeforeRun($event)
 {
@@ -108,6 +141,7 @@ function onBeforeQuery($event)
 function onAfterQuery($event)
 {
 	$msec = $this->getTime($this->queryTime);
+	$this->queryTimeSum += $msec;
 	$this->logger->log('DEBUG', 'query',
 		preg_replace("/(\s*[\r\n]+\s*)/m", "\\1<br>", $event->data[0]) // \n => <br>
 		." <span style=\"color:blue\">($msec ms)</span>"
@@ -134,7 +168,9 @@ function onLogDump($event)
 
 protected function logUrl()
 {
-	if ($this->app->routestr == 'pclib/debuglog') return;
+	if (strpos($this->app->routestr, 'pclib/debuglog') === 0) return;
+
+	$this->updating = true;
 
 	$request = $this->app->request;
 	$message = '<b>'
@@ -147,11 +183,12 @@ protected function logUrl()
 		$message .= '<br>'.$this->app->debugger->getDump(array($_POST));
 
 	$this->logger->log('DEBUG', 'url', $message);
+	$this->updating = false;
 }
 
 protected function printLogWindow()
 {
-	$grid = new Grid(PCLIB_DIR.'assets/debuglog.tpl');
+	$grid = new PCGrid(PCLIB_DIR.'assets/debuglog.tpl');
 	$data = $this->logger->getLog(100, array('LOGGERNAME' => $this->logger->name));
 	$grid->setArray($data);
 	print $grid;

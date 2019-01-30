@@ -12,6 +12,10 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
+namespace pclib\system;
+use pclib\MemberAccessException;
+use pclib\Exception;
+
 /**
  * Ancestor of all pclib classes.
  * Features:
@@ -86,7 +90,7 @@ class BaseObject
 		if ($parentClass = get_parent_class($className)) {
 			$this->loadDefaults($parentClass);
 		}
-		$this->setOptions((array)self::$defaults[$className]);
+		$this->setProperties((array)self::$defaults[$className]);
 		return $this;
 	}
 
@@ -94,7 +98,7 @@ class BaseObject
 	 * Set public properties of object from the array. 
 	 * @param array $defaults Array of parameters to be set.
 	 */
- 	function setOptions(array $defaults)
+ 	function setProperties(array $defaults)
 	{
 		$closure = function($o, $defaults) {
 			foreach ($defaults as $key => $value) {
@@ -119,9 +123,14 @@ class BaseObject
 	 */
 	protected function fireEvent($name, array $args = array())
 	{
-		if (!is_array($this->$name)) return false;
+		if (!$this->$name) return false;
 
-		$event = new stdClass;
+		if (!is_array($this->$name)) {
+			$class = get_class($this);
+			throw new Exception("Invalid $class->$name value - must be array.");
+		};
+
+		$event = new \stdClass;
 		$event->sender = $this;
 		$event->name = $name;
 		$event->data = $args;
@@ -138,9 +147,9 @@ class BaseObject
 	/**
 	 * Add event handler to $object->$name property. 
 	 * @param string $name Event name e.g. 'onSave'.
-	 * @param callable $callback Event handler.
+	 * @param callable $callback Event handler. (callable type hint is not supported in php 5.3)
 	 */
-	function addEvent($name, callable $callback)
+	function addEvent($name, /*callable*/ $callback)
 	{
 		if (!is_array($this->$name)) $this->$name = array();
 		array_push($this->$name, $callback);
@@ -167,7 +176,7 @@ class BaseObject
 				}
 				else {
 					$className = get_class($this);
-					throw new Exception("Required service '$className->$service' is not set.");
+					throw new \pclib\Exception("Required service '$className->$service' is not set.");
 				}
 			}
 

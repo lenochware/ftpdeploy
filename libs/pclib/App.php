@@ -12,6 +12,9 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
+namespace pclib;
+use pclib;
+
 /**
  * Gives global access to web application.
  * It is facade for application services and general datastructures.
@@ -19,9 +22,10 @@
  * - application configuration: addConfig()
  * - working with controllers: run()
  * - working with services: setService()
- * - layout: setLayout(), routing, and error handling
+ * - layout: setLayout(), message(), error()
+ * - environment, log(), language ...
  */
-class App extends BaseObject
+class App extends system\BaseObject
 {
 /** Name of the aplication */
 public $name;
@@ -38,22 +42,13 @@ public $layout;
 /** Storage of the global services - Db, Auth, Logger etc. */
 public $services = array();
 
-/** Current route: [controller,action] array. See also getRoute() , run() */
-public $route = array();
-
-/** Current enviroment (such as 'develop','test','production'). See setEnviroment() */
-public $enviroment;
+/** Current environment (such as 'develop','test','production'). */
+public $environment;
 
 /** Enabling debugMode will display debug-toolbar. */
 public $debugMode = false;
 
-/* Store bookmarks for breadcrumb navigator. */
-public $bookmarks = array();
-
 public $indexFile = 'index.php';
-
-public $CONTROLLER_POSTFIX = 'Controller';
-public $MODEL_POSTFIX = 'Model';
 
 /** var ErrorHandler */
 public $errorHandler;
@@ -73,6 +68,8 @@ public $onBeforeOut;
 /** Occurs after application output. */ 
 public $onAfterOut;
 
+public $plugins;
+
 /**
  * Load config and sessions, read route.
  * @param string $name Unique name of the application.
@@ -84,25 +81,31 @@ function __construct($name)
 	$this->name = $name;
 	$pclib->app = $this;
 
-	BaseObject::defaults('serviceLocator', array($this, 'getService'));
+	system\BaseObject::defaults('serviceLocator', array($this, 'getService'));
 
-	$this->errorHandler = new ErrorHandler;
+	$this->errorHandler = new system\ErrorHandler;
 	$this->errorHandler->register();
 
 	$this->paths = $this->getPaths();
-	$this->addConfig( PCLIB_DIR.'Config.php' );
-	$this->route = $_GET['r']? $this->getRoute() : $this->getRoute_Old();
-	$this->loadSession();
 
+	$this->environmentIp(
+		array(
+			'127.0.0.1' => 'develop',
+			'::1' => 'develop',
+			'*' => 'production',
+		)
+	);
+
+	$this->addConfig( PCLIB_DIR.'Config.php' );
 }
 
 
 function __get($name)
 {
 	switch($name) {
-		case 'controller': return $this->route[0];
-		case 'action':   return $this->route[1];
-		case 'routestr': return implode('/', $this->route);
+		case 'controller': return $this->router->action->controller;
+		case 'action':   return $this->router->action->method;
+		case 'routestr': return $this->router->action->path;
 		case 'content':  return $this->layout->values['CONTENT'];
 		case 'language': return $this->getLanguage();
 	}
@@ -114,8 +117,8 @@ function __get($name)
 function __set($name, $value)
 {
 	switch($name) {
-		case 'controller': $this->route[0] = $value; return;
-		case 'action':  $this->route[1] = $value; return;
+		case 'controller': $this->router->action->controller = $value; return;
+		case 'action':  $this->router->action->metod = $value; return;
 		case 'content': $this->setContent($value); return;
 		case 'language': $this->setLanguage($value); return;
 	}
@@ -123,7 +126,7 @@ function __set($name, $value)
 		$this->setService($name, $value);
 	}
 	else {
-		throw new Exception('Cannot assign '.gettype($value).' to App->'.$name.' property.');
+		throw new Exception("Cannot assign '%s' to App->%s property.", array(gettype($value), $name));
 	}
 }
 
@@ -147,23 +150,7 @@ function setContent($content)
  */
 function setLayout($path)
 {
-	$this->layout = new App_Layout($path);
-}
-
-/**
- * Set $app->enviroment variable, if any url pattern in $enviroments will
- * match current url. You can use wildcards.
- * Example: $app->setEnviroment(['http://localhost' => 'develop', '*' => 'production']);
- * @param array $enviroments Array of [pattern => enviroment] pairs.
- */
-function setEnviroment(array $enviroments)
-{
-	foreach($enviroments as $pattern => $name) {
-		if ($this->request->urlmatch($pattern)) {
-			$this->enviroment = $name;
-			return $this->enviroment;
-		}
-	}
+	$this->layout = new Layout($path);
 }
 
 /**
@@ -179,36 +166,18 @@ function log($category, $message_id, $message = null, $item_id = null)
 }
 
 /**
- * Return Debugger object, create it, if not exists.
+ * Return default service object or null, if service must be created by user.
+ * @param string $serviceName
+ * @return IService $service
  */
-function getDebugger()
-{
-	if (!$this->services['debugger']) $this->setService('debugger', new Debugger);
-	return $this->services['debugger'];
-}
+protected function createDefaultService($serviceName) {
+	$canBeDefault = array('logger', 'debugger', 'request', 'router');
+	if (in_array($serviceName, $canBeDefault)) {
+		$className = '\\pclib\\'.ucfirst($serviceName);
 
-/**
- * Return Request object, create it, if not exists.
- */
-function getRequest()
-{
-	if (!$this->services['request']) $this->setService('request', new Request);
-	return $this->services['request'];
-}
-
-/**
- * Return Logger object, create it, if not exists.
- */
-function getLogger($options = array())
-{
-	if (!$this->services['logger']) {
-		$this->setService('logger', new Logger);
+		return new $className;
 	}
-	if ($options) {
-		$this->services['logger']->categories = $options['log'];
-	}
-
-	return $this->services['logger'];
+	else return null;
 }
 
 /**
@@ -224,10 +193,17 @@ function setService($name, IService $service)
 
 function getService($serviceName)
 {
-	if ($serviceName == 'request') return $this->getRequest();
-	if ($serviceName == 'debugger') return $this->getDebugger();
-	if ($serviceName == 'logger') return $this->getLogger();
-	return $this->services[$serviceName];
+	if (isset($this->services[$serviceName])) {
+		return $this->services[$serviceName];
+	}
+	else {
+		$service = $this->createDefaultService($serviceName);
+		if ($service) {
+			$this->setService($serviceName, $service);
+			return $service;
+		}
+	}
+	return false;
 }
 
 /**
@@ -249,21 +225,47 @@ function addConfig($source)
 			require $source;
 	}
 
-	$this->config = array_merge($this->config, (array)$config);
+	$this->config = array_replace_recursive($this->config, (array)$config);
 
-	if (is_array($enviroment))  {
-		$var = $this->setEnviroment($enviroment);
-		$this->config = array_merge($this->config, (array)$$var);
+	$_env = $this->environment;
+
+	if (is_string($_env) and is_array($$_env)) {
+		$this->config = array_replace_recursive($this->config, $$_env);
 	}
 
 	$this->configure();
 }
 
+function addPlugins($dir)
+{
+	$this->plugins[] = array();
+  foreach (glob($dir.'/*.php') as $fileName) {
+    require_once($fileName);
+    $pluginName = basename($fileName, '.php');
+    $plugin = new $pluginName($this);
+    $plugin->init();
+   	$this->plugins[] = $plugin;
+  }
+}
+
+/**
+ * Set $app->environment variable by server ip-address.
+ * @param array $env Array of ipAddress:environmentName pairs.
+ */
+function environmentIp(array $env)
+{
+	$serverIp = $this->request->serverIp;
+	foreach ($env as $ip => $environment) {
+		if ($ip == '*' or $ip == $serverIp) {
+			$this->environment = $environment;
+			return;
+		}
+	}
+}
+
 protected function registerDebugBar()
 {
-	require_once PCLIB_DIR . 'extensions/DebugBar.php';
-	$debugbar = new DebugBar;
-	$debugbar->register();
+	extensions\DebugBar::register();
 }
 
 /*
@@ -272,44 +274,43 @@ protected function registerDebugBar()
  */
 public function configure()
 {
+	global $pclib;
 	$this->errorHandler->options = $this->config['pclib.errors'];
-	$underscore = $this->config['pclib.compatibility']['controller_underscore_postfixes']? '_' : '';
-	$this->CONTROLLER_POSTFIX = $underscore.'Controller';
-	$this->MODEL_POSTFIX = $underscore.'Model';
 
-	if ($this->config['pclib.logger']) {
-		$this->getLogger($this->config['pclib.logger']);
+	if ($this->config['pclib.logger']['log']) {
+		$this->logger->categories = $this->config['pclib.logger']['log'];
 	}
 	foreach ($this->config['pclib.directories'] as $k => $dir) {
 		$this->config['pclib.directories'][$k] = paramstr($dir, $this->paths);
 	}
-	//$this->events->run($this, 'pclib.app.onconfigure');
+	if ($this->config['pclib.compatibility']['legacy_classnames']) {
+		$pclib->autoloader->addAliases($pclib->legacyAliases);
+	}
 }
 
 /**
  * Perform redirect to $route.
  * Example: $app->redirect("products/edit/id:$id");
+ * @param string|array $route
+ * @param htttp code (e.g. 301 Moved Permanently)
  * See also @ref pcl-route
  */
-function redirect($route)
+function redirect($route, $code = null)
 {
-	$this->saveSession();
-	$url = $this->getUrl($route);
+
+	if ($code and function_exists('http_response_code')) {
+		http_response_code($code);
+	}
+
+	if (is_array($route)) {
+		$url = $route['url'];
+	}
+	else {
+		$url = $this->router->createUrl($route);
+	}
+
 	header("Location: $url");
 	exit();
-}
-
-/** Load application state from session. */
-protected function loadSession()
-{
-	$this->bookmarks = $this->getSession('pclib.bookmarks');
-}
-
-/** Save application state to session. */
-protected function saveSession()
-{
-	if (isset($this->bookmarks))
-		$this->setSession('pclib.bookmarks', $this->bookmarks);
 }
 
 /**
@@ -317,16 +318,31 @@ protected function saveSession()
  * You can access current language as $app->language.
  * @param string $language Language code such as 'en' or 'source'.
  * @param bool $useDefault Preload default texts?
+ * @param bool $useFile Try load texts from php file?
  */
-function setLanguage($language, $useDefault = true)
+function setLanguage($language, $useDefault = true, $useFile = true)
 {
 	$trans = new Translator($this->name);
 	$trans->language = $language;
-	$transFile = $this->config['pclib.directories']['localization'].$language.'.php';
-	if (file_exists($transFile)) $trans->useFile($transFile);
-	else throw new FileNotFoundException("Translator file '$transFile' not found.");
-	if ($useDefault) $trans->usePage('default');
-	if ($language == 'source') $trans->autoUpdate = true;
+	
+	if ($language == 'source') {
+		$trans->autoUpdate = true;
+	}
+	elseif($useFile) {
+		$transFile = $this->config['pclib.directories']['localization'].$language.'.php';
+		if (file_exists($transFile)) $trans->useFile($transFile);
+		else throw new FileNotFoundException("Translator file '$transFile' not found.");
+	}
+
+	if ($useDefault) {
+		try {
+			$trans->usePage('default');
+		} catch (Exception $e) {
+			throw new Exception('Cannot load texts for translator - '.$e->getMessage());
+		}
+
+	}
+
 	$this->setService('translator', $trans);
 }
 
@@ -349,7 +365,7 @@ function getPaths()
 		'webroot' => $this->normalizeDir($webroot),
 		'baseurl' => $this->normalizeDir(dirname($_SERVER['SCRIPT_NAME'])),
 		'basedir' => $this->normalizeDir(dirname($_SERVER['SCRIPT_FILENAME'])),
-		'pclib' 	=> $this->normalizeDir(substr(PCLIB_DIR, strlen($webroot))),
+		'pclib' => $this->normalizeDir(substr(PCLIB_DIR, strlen($webroot))),
 	);
 }
 
@@ -418,6 +434,21 @@ function error($message, $cssClass = null)
 }
 
 /**
+ * Display error message with http response code header and exit application.
+ * @see message()
+ **/
+function httpError($code, $message, $cssClass = null)
+{
+	if (function_exists('http_response_code')) {
+		http_response_code($code);
+	}
+
+	$args = array_slice(func_get_args(), 3);
+	$message = vsprintf($this->t($message), $args);
+	$this->error($message, $cssClass);
+}
+
+/**
  * Get application session variable.
  * Session variables are stored in their own namespace $ns.
  * By default it is application name, so sessions for different
@@ -477,182 +508,49 @@ function deleteSession($name = null, $ns = null)
 		unset($_SESSION[$ns]);
 }
 
-/*
- * Bookmark (store in session) current URL as $title.
- * Next you can build breadcrumb navigator from bookmarked url adresses.
- * Ex: app->bookmark(1, 'Main page'); app->bookmark(2, 'Subpage');
- * @see getNavig()
- *
- * @param string $level Level of this item in history/breadcrumb tree.
- * @param string $title Label of the link shown in navigator
- * @param string $route If set, it will bookmark this route instead of current url
- * @param string $url If set, it will bookmark this url instead of current url
- */
-function bookmark($level, $title, $route = null, $url = null)
+function getClassName($name, $loaderName)
 {
-	if ($route) list($temp, $url) = explode('?', $this->getUrl($route));
+	$options = $this->config['pclib.loader'][$loaderName];
+	if (!$options) throw new Exception("Loader '%s' is not defined in configuration.", array($loaderName));
 
-	$maxlevel =& $this->bookmarks[-1]['maxlevel'];
-	for ($i = $maxlevel; $i > $level; $i--) { unset($this->bookmarks[$i]); }
-	$maxlevel = $level;
-
-	$this->bookmarks[$level]['url'] = isset($url)? $url : $_SERVER['QUERY_STRING'];
-	$this->bookmarks[$level]['title'] = $title;
-}
-
-/*
- * Return HTML (breadcrumb) navigator: bookmark1 / bookmark2 / bookmark3 ...
- * It is generated from bookmarked pages.
- * @see bookmark()
- * @param string $separ link separator
- * @param bool $lastLink current page is link in navigator
- */
-function getNavig($separ = ' / ', $lastLink = false)
-{
-	$maxlevel = $this->bookmarks[-1]['maxlevel'];
-	for($i = 0; $i <= $maxlevel; $i++) {
-		$url   = $this->bookmarks[$i]['url'];
-		$title = $this->bookmarks[$i]['title'];
-		$alt = '';
-		if (!$title) continue;
-
-		if (utf8_strlen($title) > 30) {
-			$alt = 'title="'.$title.'"';
-			$title = utf8_substr($title, 0, 30). '...';
-		}
-
-		if ($i == $maxlevel and !$lastLink)
-			$navig[] = "<span $alt>$title</span>";
-		else
-			$navig[] = "<a href=\"".$this->indexFile."?$url\" $alt>$title</a>";
-
+	if ($this->config['pclib.compatibility']['legacy_classnames']) {
+		$postfix = $options['postfix']? '_'.lcfirst($options['postfix']) : '';
 	}
-	return implode($separ, (array)$navig);
-}
-
-/**
- * Return App_Controller object.
- * @param string $name Name of the controller's class without postfix
- **/
-function getController($name)
-{
-	$className = ucfirst($name).$this->CONTROLLER_POSTFIX;
-
-	$dir = $this->config['pclib.directories']['controllers'];
-
-	$searchPaths = array(
-		$dir.$className.'.php', 
-		$dir.strtolower($className).'.php',
-		$dir.$name.'.php',
-	);
-
-	while ($path = array_shift($searchPaths)) {
-		if (file_exists($path)) break;
-		if (!$searchPaths) return null;
+	else {
+		$name = ucfirst($name);
+		$postfix = $options['postfix'];
 	}
 
-	require_once($path);
-	$controller = new $className($this);
-	return $controller;
-}
+	$className = $name.$postfix;
 
-/**
- * Return Model object.
- * @param string $name Name of the Model's class without postfix
- **/
-function getModel($name)
-{
-	$className = $name.$this->MODEL_POSTFIX;
-	$dir = $this->config['pclib.directories']['models'];
-	$path = $dir.$className.'.php';
-
-	require_once($path);
-	$model = new $className($this);
-	return $model;
-}
-
-/**
- * Read current URL and return route [controller,action].
- * Override for your own route format. By default it takes parameter 'r'
- * .i.e. url '?r=orders/add' means call method add() of Orders_Controller.
- */
-function getRoute()
-{
-	$route = explode('/', $_GET['r']);
-
-	//%form button has been pressed, set route accordingly.
-	if ($_REQUEST['pcl_form_submit'])
-		$route[1] = $_REQUEST['pcl_form_submit'];
-	return $route;
-}
-
-//Support of old url format for backward compatibility.
-function getRoute_Old()
-{
-	$module = $_GET['module']? $_GET['module'] : $_GET['modul'];
-	$action = $_GET['action'];
-	$id     = $_GET['id'];
-
-	if ($_REQUEST['pcl_form_submit'])
-		$action = $_REQUEST['pcl_form_submit'];
-
-	return array($module, $action, $id);
-}
-
-/**
- * Translate internal route to proper url.
- * Used when links in templates are generated or for redirection.
- * @param string|array $ra route 'ctrl/action/param:param' or array('route'=>...,'params=>...)
- */
-function getUrl($ra)
-{
-	if (!$ra) return '';
-	if (is_string($ra)) $ra = $this->splitRoute($this->replaceParams($ra));
-
-	$index = BASE_URL.$this->indexFile;
-	if ($ra['route']) {
-		$ra['params'] = array('r' => implode('/', $ra['route'])) + (array)$ra['params'];
+	if($options['dir']) {
+		$path = $options['dir'].'/'.$className.'.php';
+		if (!file_exists($path)) return $options['default'];
+		require_once($path);
 	}
-	$spar = pcl_build_query($ra['params']);
-	return $index.($spar? '?'.$spar:'');
-}
 
-function splitRoute($rs)
-{
-	if (!$rs) return array();
-	$ra = array('route' => array(), 'params' => array());
-
-	foreach(explode('/', $rs) as $section) {
-		if ($section == '__GET__') {$ra['params'] += $_GET; continue;}
-		list($name,$value) = explode(':', $section);
-		if (isset($value)) $ra['params'][$name] = $value;
-		else $ra['route'][] = $section;
+	if ($options['namespace']) {
+		$className = $options['namespace'].'\\'.$className;
 	}
-	return $ra;
+
+	return $className;
 }
 
-protected function replaceParams($s)
+function newController($name)
 {
-	if (strpos($s,'{') !== false) $s = preg_replace_callback (
-		"/{([a-z0-9_.]+)}/i", array($this, 'callback_getvalue'), $s
-	);
-	return $s;
+	$className = $this->getClassName($name, 'controller');
+	return $className? new $className($this) : null;
 }
 
-private function callback_getvalue($param)
+function newModel($name)
 {
-	list($id,$sub) = explode('.', $param[1]);
-	if ($id == 'GET') {
-		if ($sub) return $_GET[$sub];
-		else return '__GET__';
-	}
-	else return null;
+	return orm\Model::create($name, array(), false);
 }
 
 /**
  * Execute method of the controller.
- * Without parameters, route is read from current url - i.e. from #$route variable.
- * Route ['products','add'] means: call method Products_Controller->add_action();
+ * Without parameters, route is read from current url.
+ * Route 'products/add' means: call method ProductsController->addAction();
  * @param string $rs Route string. See @ref pcl-route
  **/
 function run($rs = null)
@@ -660,20 +558,18 @@ function run($rs = null)
 	if ($this->debugMode) $this->registerDebugBar();
 
 	if ($rs) {
-		$ra = $this->splitRoute($rs);
-		$this->route = $ra['route'];
-		$params = $ra['params'];
+		$this->router->action = new Action($rs);
 	}
-	else
-		$params = $_GET;
+	
+	$action = $this->router->action;
 
 	$event = $this->onBeforeRun();
 	if ($event and !$event->propagate) return;
 
-	$ct = $this->getController($this->controller);
-	if (!$ct) $this->error('Page not found: "%s"', null, $this->controller);
+	$ct = $this->newController($action->controller);
+	if (!$ct) $this->httpError(404, 'Page not found: "%s"', null, $action->controller);
 
-	$html = $ct->run($this->action, $params);
+	$html = $ct->run($action);
 
 	$event = $this->onAfterRun();
 	if ($event and $event->propagate) return;
@@ -694,7 +590,6 @@ function out()
 
 	if (!$this->layout) throw new NoValueException('Cannot show output: app->layout does not exists.');
 	$this->layout->out();
-	$this->saveSession();
 	$this->onAfterOut();
 }
 

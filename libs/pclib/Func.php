@@ -12,24 +12,6 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
-/**#@+ VARIOUS TPL CONSTANTS */
-define( 'TPL_ELEM',  chr(1) );
-define( 'TPL_SEPAR', chr(2) );
-define( 'TPL_BLOCK', chr(3) );
-define( 'EOL',       "\n" );
-/**#@-*/
-
-/**
- * If not set $a return $b, otherwise $a
- *
- * @param string $name desc
- * @return string $name desc
-**/
-function ifnot($a,$b)
-{
-	return $a?$a:$b;
-}
-
 /** Placeholders in string $str will be replaced with values from $param array.
  *  Format is the same like for template file. \n
  *  Ex: print paramstr("{A} is {B}", array('A' => 'pclib', 'B' => 'best')); \n
@@ -66,7 +48,7 @@ function paramstr($str, $param, $keepEmpty = false)
 function dump()
 {
 	global $pclib;
-	$debug = $pclib->app->getDebugger();
+	$debug = $pclib->app->debugger;
 	$args = func_get_args();
 	$s = $debug->getDump($args);
 	$debug->errorDump('DUMP: Application stopped at');
@@ -88,7 +70,7 @@ function jdump()
 	}
 	
 	if ($pclib->app->layout)
-		$pclib->app->layout->_PRECONTENT = "<script>$js</script>";
+		$pclib->app->layout->addInline("<script>$js</script>");
 	else
 		print "<script>$js</script>";
 }
@@ -103,7 +85,7 @@ function logdump()
 	$app = $pclib->app;
 	$args = func_get_args();
 	
-	$debug = $app->getDebugger();
+	$debug = $app->debugger;
 	$sav = $debug->useHtml;
 	$debug->useHtml = false;
 	$s = $debug->getDump($args);
@@ -224,7 +206,7 @@ function mimetype($path)
 **/
 function filedata($path, $force_download = false, $filename = null)
 {
-	if (!file_exists($path)) throw new FileNotFoundException;
+	if (!file_exists($path)) throw new Exception('File not found.'); //FileNotFoundException;
 	if (!$filename) $filename = extractpath($path, '%f.%e');
 
 	if ($force_download) {
@@ -338,19 +320,6 @@ function utf8_htmlspecialchars($s)
 function startsWith($s, $substr)
 {
 	return (strpos($s, $substr) === 0);
-}
-
-//for php <= 5.2
-if (!function_exists('get_called_class')) {
-	function get_called_class()
-	{
-		foreach ( debug_backtrace() as $trace ) {
-			if ( isset( $trace['object'] ) )
-				if ( $trace['object'] instanceof $trace['class'] )
-					return get_class( $trace['object'] );
-		}
-		return false;
-	}
 }
 
 ?>
