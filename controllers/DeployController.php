@@ -90,6 +90,24 @@ function previewAction($task)
   return $grid;
 }
 
+function skipAction($task)
+{
+  $rows = (array)$_POST['rowdata'];
+  $task = sanitize($task, 'file-id');
+  $config = include('config/'.$task.'.php');  
+  $hashes = $this->loadHashFile($task);
+  $sourcedir = $config['local'];
+
+  foreach ($rows as $row) {
+    list($fileName, $status) = explode(' ', $row['FILE']);
+    $hashes[$fileName] = md5_file($sourcedir.'/'.$fileName);
+  }
+
+  $this->saveHashFile($task, $hashes);
+  $this->app->message('Označení dokončeno.');
+  $this->app->redirect("deploy/preview/task:$task");
+}
+
 /** Copy or delete selected files to remote server. */
 function commitAction($task)
 {

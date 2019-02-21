@@ -6,6 +6,7 @@ input COMMENT size "100"
 input PASSWORD password
 bind STATUS_TEXT list "modified,změna,deleted,smazáno,created,vytvořeno,unwatch,dál nesledovat" field "STATUS"
 button commit lb " Publikovat" tag "button" glyph "fa fa-flag"
+button skip lb "Přeskočit..." tag "button" confirm "Označit jako nahrané?"
 pager pager pglen "10000"
 ?>
 <style>
@@ -65,7 +66,7 @@ Celkem {TOTAL} souborů.
 	<td>{PASSWORD}</td>
 </tr>
 <tr>
-	<td>{commit}</td>
+	<td colspan="2">{commit} {skip}</td>
 	<td></td>
 </tr>
 </table>
