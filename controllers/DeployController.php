@@ -100,7 +100,13 @@ function skipAction($task)
 
   foreach ($rows as $row) {
     list($fileName, $status) = explode(' ', $row['FILE']);
-    $hashes[$fileName] = md5_file($sourcedir.'/'.$fileName);
+
+    if (file_exists($sourcedir.'/'.$fileName)) {
+      $hashes[$fileName] = md5_file($sourcedir.'/'.$fileName);
+    }
+    else {
+      unset($hashes[$fileName]);
+    }
   }
 
   $this->saveHashFile($task, $hashes);
