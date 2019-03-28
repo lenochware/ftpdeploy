@@ -31,6 +31,7 @@ class FileSync
 
 		switch ($datasource['scheme']) {
 			case 'ftp':
+			case 'ftps':
 				$this->remote = new FtpDriver($datasource);
 				break;
 
@@ -199,7 +200,13 @@ class FtpDriver
 	function connect($datasource)
 	{
 		$this->rootDir = $datasource['path'];
+
+		if ($datasource['scheme'] == 'ftps') {
+			$this->connection = ftp_ssl_connect($datasource['host']);
+		}
+		else {
 		$this->connection = @ftp_connect($datasource['host']);
+		}
 
 		$ok = @ftp_login($this->connection, $datasource['user'], $datasource['pass']);
 			

@@ -147,12 +147,11 @@ function commitAction($task)
   }
 
   $this->result['time'] = round(microtime(true) - $startTime, 2);
-  
   $this->logger->log(paramstr("Aktualizováno {ok} souborů, {failed} chyb ({time}s)\n", $this->result));
 
   //dump($modified, $deleted);
   $this->saveHashFile($task, $hashes);
-  return nl2br($this->logger->output);
+  return $this->logger->getHtmlOutput();
 }
 
 function remoteCopy($fs, $modified, &$hashes)
