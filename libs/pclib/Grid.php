@@ -217,8 +217,9 @@ function summary($field, $sql = '', $sumblock = 'summary')
 	preg_match_all("/\[[a-z0-9_]+\]/i", $sql, $params);
 	$this->sumArray[$sumblock]['params'] = $params[0];
 
-	$cmd = "return (\$a['pos'] < \$b['pos']) ? -1:+1;";
-	uasort($this->sumArray, create_function('$a,$b', $cmd));
+	uasort($this->sumArray, function($a, $b) { 
+		return ($a['pos'] < $b['pos']) ? -1:+1;
+	});
 }
 
 /**
@@ -599,7 +600,9 @@ function getExportCsv($options = [])
 
 	foreach ($values as $i => $row) {
 		foreach($elms as $id => $elem) {
+			if (!$this->fireEventElem('onprint',$id,'',$row[$id])) {
 			$this->print_Element($id, '', $row[$id]);
+			}
 			if ($id != $last_id) print $options['csv-separ'];
 		}
 		if($values[$i+1]) print $options['csv-row-separ'];
