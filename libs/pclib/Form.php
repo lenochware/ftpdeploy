@@ -88,16 +88,21 @@ protected function _init()
 	}
 
 	foreach ($this->elements as $id=>$elem) {
-		if ($elem['hidden']) $this->hidden[$id] = $id;
-		if ($elem['file'] and $elem['type'] == 'input')
+		if (!empty($elem['hidden'])) $this->hidden[$id] = $id;
+		if (!empty($elem['file']) and $elem['type'] == 'input') {
 			$this->header['fileupload'] = 1;
-		if ($elem['ajaxget']) $this->header['ajax'] = 1;
-		if (strpos($elem['size'],'/')) {
+		}
+
+    if (!empty($elem['ajaxget'])) {
+    	$this->header['ajax'] = true;
+    }
+
+		if (strpos(array_get($elem, 'size'), '/')) {
 			list($sz,$ml) = explode('/',$elem['size']);
 			$this->elements[$id]['size'] = $sz;
 			$this->elements[$id]['maxlength'] = $ml;
 		}
-		if ($elem['type'] == 'check' and $elem['default']) {
+		if ($elem['type'] == 'check' and !empty($elem['default'])) {
 			$this->elements[$id]['default'] = explode(',', $elem['default']);
 		}
 	}
@@ -106,17 +111,24 @@ protected function _init()
 		$this->dbSync($this->header['table']);
 	}
 
-	if ($_REQUEST['submitted'] != $this->name) return;
+	$request = $_REQUEST + [
+		'submitted' => null, 
+		'pcl_form_submit' => null, 
+		'csrf_token' => null, 
+		'ajax_id' => null
+	];
 
-	$this->submitted = $_REQUEST['pcl_form_submit'] ?: true;
+	if ($request['submitted'] != $this->name) return;
+
+	$this->submitted = $request['pcl_form_submit'] ?: true;
 
 	if ($this->header['csrf']
-		and $_REQUEST['csrf_token'] != $this->getCsrfToken()
+		and $request['csrf_token'] != $this->getCsrfToken()
 	) throw new AuthException("CSRF authorization failed.");
 
 
-	if ($_REQUEST['ajax_id']) {
-		$this->ajax_id = pcl_ident($_REQUEST['ajax_id']);
+	if ($request['ajax_id']) {
+		$this->ajax_id = pcl_ident($request['ajax_id']);
 		$this->header['get'] = 1;
 	}
 
@@ -175,9 +187,9 @@ function validate()
 protected function validateElementCallback($event)
 {
 	$elem = $event->data[1];
-	$id = $elem['id'];
+	$id = array_get($elem, 'id');
 
-	if (!$this->isEditable($id)) {
+	if (!$id or !$this->isEditable($id)) {
 		$event->propagate = false;
 		$event->result = true;
 		return;
@@ -207,8 +219,8 @@ function loadSession()
 	if (!$this->sessName) return;
 	$s = $this->app->getSession($this->sessName);
 
-	$this->values  = $s['values'];
-	$this->invalid = $s['invalid'];
+	$this->values  = array_get($s, 'values');
+	$this->invalid = array_get($s, 'invalid');
 }
 
 /**
@@ -266,8 +278,10 @@ protected function getHttpData()
 			continue;
 		}
 
-		if ($elem['type'] == 'check' and !$data[$id] and !$elem['noprint']) $data[$id] = array();
-		elseif($elem['type'] == 'input' and is_string($data[$id])) $data[$id] = trim($data[$id]);
+		$val = array_get($data, $id);
+		if ($elem['type'] == 'check' and !$val and !$elem['noprint']) $data[$id] = array();
+		elseif ($elem['type'] == 'select' and $elem['multiple'] and !$val and !$elem['noprint']) $data[$id] = array();
+		elseif($elem['type'] == 'input' and is_string($val)) $data[$id] = trim($val);
 	}
 
 	foreach ((array)$_FILES as $id => $aFile) {
@@ -300,15 +314,15 @@ protected function getTag($id, $ignoreHtmlAttr = false)
 	if ($this->getAttr($id, 'noedit')) $tag[] = 'disabled';
 	if ($html5) {
 		if ($elem['required']) $tag[] = 'required';
-		if ($elem['pattern']) $tag['pattern'] = $elem['pattern'];
+		if (!empty($elem['pattern'])) $tag['pattern'] = $elem['pattern'];
 	}
 
 	$tag['placeholder'] = $elem['hint'];
 
 	$class = array();
-	if ($elem['html']['class']) $class[] = $elem['html']['class'];
+	if (!empty($elem['html']['class'])) $class[] = $elem['html']['class'];
 	if ($this->getAttr($id, 'noedit')) $class[] = 'disabled';
-	if ($this->invalid[$id]) $class[] = 'err';
+	if (!empty($this->invalid[$id])) $class[] = 'err';
 	if ($elem['required']) $class[] = 'required';
 	$tag['class'] = $class;
 
@@ -382,7 +396,9 @@ function print_Element($id, $sub, $value)
 
 	if ($sub == 'err') {
 		print '<span class="err">';
-		print $this->invalid[$id];
+		if (!empty($this->invalid[$id])) {
+			print $this->invalid[$id];
+		}
 		print '</span>';
 		return;
 	}
@@ -477,6 +493,7 @@ function print_Class($id, $sub, $value)
 
 	print ($printFunc == 'trPrintElement')? "<tr><td colspan=\"3\">" : '<div class="form-group buttons">';
 	foreach($this->elements as $id => $elem) {
+		if ($id == 'pcl_document') continue;
 		if ($elem['noprint'] or $elem['skip'] or $elem['type'] != 'button') continue;
 		$this->print_Button($id, '', $this->getValue($id));
 		print ' ';
@@ -488,7 +505,7 @@ function print_Class($id, $sub, $value)
 protected function trPrintElement($elem)
 {
 	$id = $elem['id'];
-	if ($elem['hidden']) return;
+	if (!empty($elem['hidden'])) return;
 	print "<tr><td class=\"$id\">";
 	$this->print_Element($id, 'lb', null);
 	print '</td><td>';
@@ -522,8 +539,10 @@ protected function divPrintElement($elem)
 function print_Label($id)
 {
 	$elem = $this->elements[$id];
+	$class = [];
 	if ($elem['required']) $class[] = 'required';
-	if ($this->invalid[$id]) $class[] = 'err';
+	if (!empty($this->invalid[$id])) $class[] = 'err';
+	$attr = '';
 	if ($class) $attr = ' class="'.implode(' ',$class).'"';
 	if ($this->header['ajax']) $attr .= " id=\"xl_$id\"";
 	print "<label for=\"$id\"$attr>";
@@ -573,12 +592,12 @@ function print_Input($id, $sub, $value)
 
 		if ($html5) {
 			if ($elem['date']) $type = 'date';
-			else if ($elem['number']) $type = 'number';
-			else if ($elem['email'])  $type = 'email';
-			else if ($elem['tel'])  $type = 'tel';
-			else if ($elem['website'])  $type = 'website';
-			else if ($elem['color'])  $type = 'color';
-			else if ($elem['time']) {
+			else if (!empty($elem['number'])) $type = 'number';
+			else if (!empty($elem['email']))  $type = 'email';
+			else if (!empty($elem['tel']))  $type = 'tel';
+			else if (!empty($elem['website']))  $type = 'website';
+			else if (!empty($elem['color']))  $type = 'color';
+			else if (!empty($elem['time'])) {
 				$type = 'time';
 				$tag['step'] = 1800;
 			}
@@ -620,7 +639,12 @@ function print_Button($id, $sub, $value)
 {
 	$elem = $this->elements[$id];
 	$url = $this->getUrl($elem);
-	$onclick = $elem['onclick'] ?: $elem['html']['onclick'];
+
+	$onclick = $elem['onclick'];
+	if (!$onclick and !empty($elem['html']['onclick'])) {
+		$onclick = $elem['html']['onclick'];
+	};
+
 	$tagname = $this->useButtonTag? 'button':'input';
 	if ($elem['tag']) $tagname = $elem['tag'];
 
@@ -653,6 +677,10 @@ function print_Button($id, $sub, $value)
 		$onclick = "window.location='$url';";
 	}
 
+	if ($onclick) {
+	  	$onclick = $this->replaceParams($onclick);
+	}
+
 	$tag['onclick'] = $onclick;
 	print $this->htmlTag($tagname, $tag, $content);
 }
@@ -673,8 +701,8 @@ function print_Checkbox_Radio_Group($id, $sub, $value)
 		return;
 	}
 
-	$class = $elem['html']['class'];
-	$style = $elem['html']['style'];
+	$class = array_get($elem['html'], 'class');
+	$style = array_get($elem['html'], 'style');
 	$class = trim(($is_radio?'radio':'checkbox').'-group '.$class);
 	if ($c = $elem['columns'])
 		$style = "-moz-columns:$c;-webkit-columns:$c;columns:$c;".$style;
@@ -778,23 +806,40 @@ function print_Select($id, $sub, $value)
 	$options = array();
 	$html = $elem['noemptylb']? '':'<option value="">'.$this->t($emptylb).'</option>';
 
+	if ($elem['multiple'] and $value and !is_array($value))
+	{
+		$value = explode(',', $value);
+	}
+
 	$group = '_nogroup_';
 	foreach ($items as $i => $item) {
 		if (is_array($item)) list($label,$group) = $item;
 		else $label = $item;
 
-		$ch = ((string)$i == (string)$value)? ' selected="selected"' : '';
+		if (is_array($value)) {
+			$ch = (in_array($i, $value))? ' selected="selected"' : '';
+		}
+		else {
+			$ch = ((string)$i == (string)$value)? ' selected="selected"' : '';
+		}
+
 		$i = $this->escape($i);
 		$label = $this->escape($label);
 
-		$options[$group] .= "<option value=\"$i\"$ch>$label</option>";
+		$options[$group] = array_get($options, $group)."<option value=\"$i\"$ch>$label</option>";
 	}
-	if ($options['_nogroup_']) $html .= $options['_nogroup_'];
+	if (isset($options['_nogroup_'])) $html .= $options['_nogroup_'];
 	else {
 		foreach($options as $group => $content) {
 			$html .= "<optgroup label=\"$group\">$content</optgroup>";
 		}
 	}
+	
+	if ($elem['multiple']) {
+		$tag['name'] .= '[]';
+		$tag['multiple'] = 1;
+	}
+
 	$html = $this->htmlTag('select', $tag, $html).$this->ieFix($id,$tag['name'],$value);
 	print $html;
 }
@@ -818,22 +863,26 @@ function preparedValues($skipEmpty = false)
 			continue;
 		}
 
-		if ($this->elements[$id]['file'] and (!$this->values[$id] or $this->hasExtraSave($id))) {
+		if (!empty($this->elements[$id]['file']) and (!$this->values[$id] or $this->hasExtraSave($id))) {
 			continue;
 		}
 
 		if ($fmt = $this->getAttr($id, 'format')) 
 			$value = $this->formatStr($value, $fmt);
 
-		if ($elem['date'])
+		if (!empty($elem['date']))
 			$value = $this->toSqlDate($value, $elem['date']);
 
-		if ($elem['number'] and $elem['number'] != 'strict')
+		if (!empty($elem['number']) and $elem['number'] != 'strict')
 			$value = $this->toNumber($value);
+
+		if (is_array($value) and $elem['multiple']) {
+			$value = implode(',', $value);
+		}
 
 		if (is_array($value)) $value = $this->toBitField($value);
 
-		if ($elem['onsave']) 
+		if (!empty($elem['onsave'])) 
 			$value = $this->fireEventElem('onsave', $id, '', $value);
 
 		$values[$id] = $value;
@@ -1002,22 +1051,33 @@ protected function deleteFiles($tableName, $data)
 	}
 }
 
-/**
- * Return array of label => value(s) pairs for all elements of the %form.
- * Helper for showing %form content to the end user. Used in mailTo().
- * @return array $values
- */
-function content()
+function getVisibleIds()
 {
-	if (!$this->values) return array();
-	$content = array();
+	$list = [];
 
-	foreach ($this->values as $id=>$value) {
+	foreach ($this->values as $id => $value) {
 		$elem = $this->elements[$id];
 		if ($elem['lb'] == '') continue;
 		if ($this->getAttr($elem['id'], 'noprint') or $elem['hidden']) continue;
+		$list[] = $id;
+	}
+
+	return $list;
+}
+
+function getVisibleElements()
+{
+	$list = [];
+
+	if (!$this->values) return [];
+
+	foreach ($this->getVisibleIds() as $id) {
+		$elem = $this->elements[$id];
+		$value = $this->values[$id];
+
 		if ($value == '') {
-			$content[$elem['lb']] = $elem['emptylb'];
+			$elem['value_text'] = $elem['emptylb'];
+			$list[] = $elem;
 			continue;
 		}
 
@@ -1040,7 +1100,26 @@ function content()
 			}
 		}
 
-		$content[$elem['lb']] = $value;
+		$elem['value_text'] = $value;
+
+		$list[] = $elem;
+	}
+
+	return $list;
+}
+
+/**
+ * Return array of label => value(s) pairs for all elements of the %form.
+ * Helper for showing %form content to the end user. Used in mailTo().
+ * @return array $values
+ */
+function content()
+{
+	if (!$this->values) return array();
+	$content = array();
+
+	foreach ($this->getVisibleElements() as $elem) {
+		$content[$elem['lb']] = $elem['value_text'];
 	}
 
 	return $content;
@@ -1112,15 +1191,15 @@ function dbSync($tab)
 	if (!$columns) throw new Exception("Database table '$tab' not found.");
 	foreach($this->elements as $id => $el) {
 		if (!$this->isEditable($id)) continue;
-		if (!$columns[$id] and !$this->hasExtraSave($id)) {
+		if (empty($columns[$id]) and !$this->hasExtraSave($id)) {
 			$this->elements[$id]['nosave'] = 1;
 			continue;
 		}
 		if ($columns[$id]['type'] != 'string') continue;
-		if (!$el['maxlength'])
+		if (empty($el['maxlength']))
 			$this->elements[$id]['maxlength'] = $columns[$id]['size'];
 		if ($el['type'] != 'input') continue;
-		if (!$el['size'] or $el['size'] > $columns[$id]['size'])
+		if (empty($el['size']) or $el['size'] > $columns[$id]['size'])
 			$this->elements[$id]['size'] = $columns[$id]['size'];
 	}
 }
@@ -1239,8 +1318,8 @@ protected function head()
 	$tag = array(
 		'id' => $this->name,
 		'name' => null,
-		'class' => $ha['class']? array($ha['class']) : null,
-		'__attr' => $ha['attr'],
+		'class' => (!empty($ha['class']))? array($ha['class']) : null,
+		'__attr' => array_get($ha, 'attr'),
 	);
 
 	if ($ha) $tag += $ha;
@@ -1270,7 +1349,7 @@ protected function head()
 		 $hidden['pclib_jsvalid'] = $this->getValidationString();
 	}
 
-	if ($this->header['fileupload']) $tag['enctype'] = 'multipart/form-data';
+	if (!empty($this->header['fileupload'])) $tag['enctype'] = 'multipart/form-data';
 
 	$html = $this->htmlTag('form', $tag, null, true)."\n";
 
@@ -1340,7 +1419,7 @@ private function getValidationString()
 		$rule = $options = '';
 		$required = $elem['required'];
 		foreach($rules as $testrule) {
-			if ($elem[$testrule]) {
+			if (!empty($elem[$testrule])) {
 				$rule = $testrule;
 				break;
 			}
@@ -1348,7 +1427,7 @@ private function getValidationString()
 		if (!$rule and !$required) continue;
 
 		if ($rule) {
-			if ($elem[$rule] === 1 and $defaults[$rule]) $options = $defaults[$rule];
+			if ($elem[$rule] === 1 and !empty($defaults[$rule])) $options = $defaults[$rule];
 			else $options = $elem[$rule];
 		}
 

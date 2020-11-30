@@ -229,7 +229,7 @@ function addConfig($source)
 
 	$_env = $this->environment;
 
-	if (is_string($_env) and is_array($$_env)) {
+	if (is_string($_env) and isset($$_env)) {
 		$this->config = array_replace_recursive($this->config, $$_env);
 	}
 
@@ -366,7 +366,15 @@ function getPaths()
 		'baseurl' => $this->normalizeDir(dirname($_SERVER['SCRIPT_NAME'])),
 		'basedir' => $this->normalizeDir(dirname($_SERVER['SCRIPT_FILENAME'])),
 		'pclib' => $this->normalizeDir(substr(PCLIB_DIR, strlen($webroot))),
+		'controllers' => 'controllers',
+		'modules' => 'modules',
 	);
+}
+
+/** Replace path variables e.g. {basedir} */
+function path($path)
+{
+	return paramStr($path, $this->paths);
 }
 
 /**
@@ -378,7 +386,7 @@ function getPaths()
  */
 function t($s)
 {
-	$translator = $this->services['translator'];
+	$translator = array_get($this->services, 'translator');
 	if ($translator) $s = $translator->translate($s);
 	$args = array_slice(func_get_args(), 1);
 	if ($args) {
@@ -464,9 +472,9 @@ function getSession($name, $ns = null)
 	if (!$ns) $ns = $this->name;
 	if (strpos($name, '.')) {
 		list($n1,$n2) = explode('.', $name);
-		return $_SESSION[$ns][$n1][$n2];
+		return @$_SESSION[$ns][$n1][$n2];
 	}
-	return $_SESSION[$ns][$name];
+	return @$_SESSION[$ns][$name];
 }
 
 /**
@@ -508,38 +516,20 @@ function deleteSession($name = null, $ns = null)
 		unset($_SESSION[$ns]);
 }
 
-function getClassName($name, $loaderName)
+function newController($name, $module = '')
 {
-	$options = $this->config['pclib.loader'][$loaderName];
-	if (!$options) throw new Exception("Loader '%s' is not defined in configuration.", array($loaderName));
+	$postfix = 'Controller';
+	$className = ucfirst($name).$postfix;
+	$moduleDir = $module? "{modules}/$module/" : '';
+	$namespace = $module? "\\$module\\" : '';
 
-	if ($this->config['pclib.compatibility']['legacy_classnames']) {
-		$postfix = $options['postfix']? '_'.lcfirst($options['postfix']) : '';
-	}
-	else {
-		$name = ucfirst($name);
-		$postfix = $options['postfix'];
-	}
+	$path = $this->path("$moduleDir{controllers}/$className.php");
+	
+	if (!file_exists($path)) throw new Exception("File '$path' not found.");
 
-	$className = $name.$postfix;
-
-	if($options['dir']) {
-		$path = $options['dir'].'/'.$className.'.php';
-		if (!file_exists($path)) return $options['default'];
-		require_once($path);
-	}
-
-	if ($options['namespace']) {
-		$className = $options['namespace'].'\\'.$className;
-	}
-
-	return $className;
-}
-
-function newController($name)
-{
-	$className = $this->getClassName($name, 'controller');
-	return $className? new $className($this) : null;
+	require_once($path);
+	$fullClassName = $namespace.$className;
+	return new $fullClassName($this);
 }
 
 function newModel($name)
@@ -566,7 +556,7 @@ function run($rs = null)
 	$event = $this->onBeforeRun();
 	if ($event and !$event->propagate) return;
 
-	$ct = $this->newController($action->controller);
+	$ct = $this->newController($action->controller, $action->module);
 	if (!$ct) $this->httpError(404, 'Page not found: "%s"', null, $action->controller);
 
 	$html = $ct->run($action);

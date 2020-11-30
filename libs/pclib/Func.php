@@ -26,7 +26,7 @@ function paramstr($str, $param, $keepEmpty = false)
 {
 	preg_match_all("/{([a-z0-9_.]+)}/i", $str, $found);
 	if (!$found[1]) return $str;
-	if (!is_array($param[0])) $param = array($param);
+	if (!is_array(array_get($param, 0))) $param = array($param);
 
 	$n = count($param);
 	$newstr = '';
@@ -140,7 +140,7 @@ function mkident($s, $options = '')
 	if (strlen($options) == 1) {
 	 if(ctype_alnum($options)) $o1 = $options; else $o2 = $options;
 	}
-	else { $o1 = $options{1}; $o2 = $options{0}; }
+	else { $o1 = $options[1]; $o2 = $options[0]; }
 
 	switch($o1) {
 		case 'u': $s = ucwords($s);    break;
@@ -320,6 +320,11 @@ function utf8_htmlspecialchars($s)
 function startsWith($s, $substr)
 {
 	return (strpos($s, $substr) === 0);
+}
+
+function array_get($a, $key, $default = null)
+{
+	return isset($a[$key])? $a[$key] : $default;
 }
 
 ?>

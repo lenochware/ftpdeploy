@@ -29,7 +29,7 @@ function getUser($userName)
 	$this->service('db');
 	$user = new AuthUser;
 	$user->values = $this->getData($userName);
-	$userId = $user->values['ID'];
+	$userId = array_get($user->values, 'ID');
 	if (!$userId) return null;
 
 	$user->values['roles'] = $this->getRoles($userId);
@@ -68,6 +68,8 @@ function getCredentials($userId)
 protected function getData($userName)
 {
 	$data = $this->db->select($this->USERS_TAB, "USERNAME='{0}'", $userName);
+	if (!$data) return [];
+	
 	$data['USES_DPASSW'] = ($data['PASSW'] == '');
 	
 	unset($data['PASSW'], $data['DPASSW']);

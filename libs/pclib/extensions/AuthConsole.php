@@ -47,6 +47,23 @@ function executeFile($fileName)
 }
 
 /**
+ * Execute ATERM script.
+ * @param string $s ATERM script
+ * @return bool $ok
+ * See \ref aterm-cmds for description of aterm language.
+ */
+function executeScript($s)
+{
+	$batch = explode("\n", $s);
+	if (!$batch) return false;
+	$ok = true;
+	foreach($batch as $line) {
+		if (!$this->execute($line)) $ok = false;
+	}
+	return $ok;
+}
+
+/**
  * Execute ATERM commands. Generated messages are stored in $this->messages.
  * @param string $line ATERM commands
  * @return bool $ok
@@ -55,8 +72,8 @@ function executeFile($fileName)
 function execute($line)
 {
 	$line = trim($line);
-	if ($line{0} == ';' or $line == '') return true;
-	if ($line{0} == '&') {
+	if ($line[0] == ';' or $line == '') return true;
+	if ($line[0] == '&') {
 		if (!$this->masterCmd) {
 			$this->setError('Runtime error.');
 			return false;

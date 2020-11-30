@@ -36,6 +36,8 @@ class Router extends system\BaseObject implements IService
 	/** Occurs when url (link) is created from Action. */ 
 	public $onCreateUrl;
 
+	public $redirects;
+
 
 function __construct()
 {
@@ -54,12 +56,37 @@ function getAction()
 	$action = new Action($_GET);
 
 	//%form button has been pressed, set route accordingly.
-	if ($_REQUEST['pcl_form_submit']) {
+	if (!empty($_REQUEST['pcl_form_submit'])) {
 		$action->method = $_REQUEST['pcl_form_submit'];
 	}
 
 	$this->onGetAction($action);
 	return $action;
+}
+
+/**
+ * Set route to be redirected.
+ * @param string $old Old route
+ * @param string $new New route
+ * @param string $code HTTP status code: 302 temporary | 301 permanent
+ */
+function addRedirect($old, $new, $code = 302)
+{
+	$this->redirects[$old] = ['code' => $code, 'to' => $new];
+}
+
+/**
+ * Redirect old route to new route, if it was added by addRedirect().
+ */
+function followRedirects()
+{
+	$redirect = $this->redirects[$this->action->path];
+	if (!$redirect) return;
+
+	$this->action->path = $redirect['to'];
+	$url = $this->createUrl($this->action);
+	header('Location: '. $url, true, $redirect['code']);
+	exit;
 }
 
 /**
@@ -154,7 +181,7 @@ class Action
 
 		foreach($ra as $section) {
 			if ($section == '__GET__') { $params += $_GET; continue; }
-			list($name,$value) = explode(':', $section);
+			@list($name,$value) = explode(':', $section);
 			if (isset($value)) $params[$name] = $value;
 			else $path[] = $section;
 		}
@@ -162,13 +189,10 @@ class Action
 		$this->path = implode('/', $path);
 		$this->params = $params;
 
-		$n = count($path);
-		if ($n >= 3) {
-			$path = array_slice($path, -3);
-			$this->module = array_shift($path);
-		}
+		if (!empty($path[2])) $this->module = array_shift($path);
+
 		$this->controller = $path[0];
-		$this->method = $path[1];
+		$this->method = array_get($path, 1);
 	}
 
 	/**
@@ -177,8 +201,14 @@ class Action
 	 */
 	function fromArray($get)
 	{
-		$this->path = $get['r'];
-		list($this->controller, $this->method) = explode('/', $this->path);
+		$this->path = array_get($get, 'r', '');
+		$path = explode('/', $this->path);
+		
+		if (!empty($path[2])) $this->module = array_shift($path);
+		
+		$this->controller = $path[0];
+		$this->method = isset($path[1])? $path[1] : '';
+				
 		unset($get['r']);
 		$this->params = $get;
 	}

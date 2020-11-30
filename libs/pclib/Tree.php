@@ -42,6 +42,9 @@ public $patternLink = "<li id=\"{ID}\" {ATTR}><span><a href=\"{URL}\">{LABEL}</a
 /** Pattern for %tree node. */
 public $pattern = "<li id=\"{ID}\" {ATTR}><span>{LABEL}</span></li>";
 
+/** Create link on folders too. */
+public $linkFolders = true;
+
 /** Database table for storing %tree data. */
 public $table = 'TREE_LOOKUPS';
 
@@ -94,6 +97,59 @@ protected function htmlListBegin($level)
 	return $html;
 }
 
+public function htmlTemplate($path)
+{
+	$t = new PCTpl($path);
+
+	$i = 0;
+	$html = '';
+	while($node = $this->nodes[$i++]) {
+		$next = $this->nodes[$i];
+
+		if ($node['ROUTE']) {
+			$node['URL'] = $this->service('router')->createUrl($node['ROUTE']);
+		}
+
+		if (!$this->linkFolders and $node['HASCHILD']) {
+			$node['URL'] = null;
+		}
+
+		if (!$next) {
+			$next['LEVEL'] = 0;
+		}
+
+		if ($node['HASCHILD']) {
+			$node['STATE'] = $node['EXPANDED']? 'open' : 'closed';
+			$html .= $this->getHtmlTplStrip($t, 'folderBegin', $node);
+		}
+		else {
+			$html .= $this->getHtmlTplStrip($t, 'item', $node);
+		}
+
+		if ($next['LEVEL'] < $node['LEVEL']) {
+			$n = $node['LEVEL'] - $next['LEVEL'];
+			$closeHtml = $this->getHtmlTplStrip($t, 'folderEnd', $node);
+			$html .= str_repeat($closeHtml, $n);
+		}
+	}
+
+	return $html;
+
+	//return "<ul class=\"$this->cssClass\">$html</ul>";
+}
+
+private function getHtmlTplStrip($t, $strip, $node)
+{
+	$t->values = $node;
+	if ($strip == 'item') return $t->html('item');
+	else {
+		$t->values['items'] = '__items__';
+		list($begin, $end) = explode('__items__',  $t->html('folder'));
+		return ($strip == 'folderBegin')? $begin : $end;
+	}
+
+}
+
 /**
  * Generate %tree HTML. Recursive function.
  * @param array $nodes Flat array of %tree nodes
@@ -104,7 +160,9 @@ protected function htmlTree($level = 0)
 {
 	$html = $this->htmlListBegin($level);
 
-	while($node = $this->nodes[$this->i++]) {
+	while(isset($this->nodes[$this->i])) {
+
+		$node = $this->nodes[$this->i++];
 		
 		if (!$node['ACTIVE']) {
 			$this->skipInactive($node);
@@ -122,7 +180,8 @@ protected function htmlTree($level = 0)
 			return $html;
 		}
 		else {
-			if ($this->nodes[$this->i]['LEVEL'] > $node['LEVEL']) $node['HASCHILD'] = true;
+			$next = array_get($this->nodes, $this->i);
+			if (isset($next) and $next['LEVEL'] > $node['LEVEL']) $node['HASCHILD'] = true;
 			$html .= $this->htmlListNode($node);
 		}
 	}
@@ -146,12 +205,16 @@ private function skipInactive($inactiveNode)
  */
 protected function htmlListNode($node)
 {
-	$class = $node['HASCHILD']? ($node['EXPANDED']? 'folder open' : 'folder closed') : 'item';
-	$class = trim($node['CLASS'].' '.$class);
-	if ($class) $node['ATTR'] = trim($node['ATTR']." class=\"$class\"");
-	if (!$node['ID']) $node['ID'] = $this->i;
-	if ($node['ROUTE']) {
+	$class = array_get($node, 'HASCHILD')? (array_get($node, 'EXPANDED')? 'folder open' : 'folder closed') : 'item';
+	$class = trim(array_get($node, 'CLASS').' '.$class);
+	if ($class) $node['ATTR'] = trim(array_get($node, 'ATTR')." class=\"$class\"");
+	if (!isset($node['ID'])) $node['ID'] = $this->i;
+	if (isset($node['ROUTE'])) {
 		$node['URL'] = $this->service('router')->createUrl($node['ROUTE']);
+	}
+
+	if (!$this->linkFolders and $node['HASCHILD']) {
+		$node['URL'] = null;
 	}
 
 	$this->service('translator', false);
@@ -219,16 +282,58 @@ function setString($str)
 	$this->nodes = $nodes;
 }
 
+/**
+ * Load %tree from the query. Expect fields ID, LABEL, PARENT_ID
+ */
+function setQuery($sql)
+{
+	$rows = $this->db->selectAll($sql);
+	$all = $children = [];
+	foreach ($rows as $row)
+	{
+		$children[$row['PARENT_ID']][] = $row['ID'];
+		$all[$row['ID']] = $row;
+	}
+
+	$nodes = [];
+	$this->fillNodes($nodes, $children, $all, 0, 0);
+	$this->nodes = $nodes;
+
+	//dump($nodes);
+}
+
+private function fillNodes(&$nodes, $tree, $data, $id, $level)
+{
+	foreach ($tree[$id] as $_id) {
+		$row = $data[$_id];
+		$row['LEVEL'] = $level;
+		$row['ACTIVE'] = 1;
+		if ($tree[$_id]) $row['HASCHILD'] = 1;
+		$nodes[] = $row;
+		if ($tree[$_id]) $this->fillNodes($nodes, $tree, $data, $_id, $level + 1);
+	}
+}
+
 private function readLine($line, $cells)
 {
 	$part = explode($this->CELL_SEPAR, $line);
 	$node = array();
-	foreach($cells as $i=>$name) { $node[$name] = $part[$i]; }
+	foreach($cells as $i=>$name) { $node[$name] = array_get($part, $i); }
 	$path = $node['PATH']; unset($node['PATH']);
 	$node['LEVEL'] = substr_count($path, $this->LEVEL_SEPAR);
 	$node['LABEL'] = $node['LEVEL']? substr($path,strrpos($path, $this->LEVEL_SEPAR)+strlen($this->LEVEL_SEPAR)) : $path;
 	if(!isset($node['ACTIVE'])) $node['ACTIVE'] = 1;
 	return $node;
+}
+
+function setValue($node_id, $name, $value)
+{
+	foreach ($this->nodes as $i => $node) {
+		if ($node['ID'] == $node_id) {
+			$this->nodes[$i][$name] = $value;
+			return;
+		}
+	}
 }
 
 /**
