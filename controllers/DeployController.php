@@ -308,7 +308,13 @@ public function diffAction($file, $repository)
   $fs->connect($config['remote']);
   $from_file = $fs->getFile($file);
 
-  return '<h2>' . $file . '</h2><hr>' . Diff::toTable(Diff::compare($from_file, $to_file));
+  if ($config['charset']) {
+    $from_file = iconv($config['charset'], 'utf-8', $from_file);
+    $to_file = iconv($config['charset'], 'utf-8', $to_file);
+
+  }
+
+  return '<h2>' . $file . '</h2><div id="navig-links"></div><hr>' . Diff::toTable(Diff::compare($from_file, $to_file));
 }
 
 }
