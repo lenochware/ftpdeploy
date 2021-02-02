@@ -205,7 +205,7 @@ class FtpDriver
 			$this->connection = ftp_ssl_connect($datasource['host']);
 		}
 		else {
-		$this->connection = @ftp_connect($datasource['host']);
+			$this->connection = @ftp_connect($datasource['host']);
 		}
 
 		$ok = @ftp_login($this->connection, $datasource['user'], $datasource['pass']);

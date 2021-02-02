@@ -20,6 +20,7 @@ return array(
 	'local' => '/local/path/to/files',
 	'remote' => 'ftp://user:password@ftp.host.com/path/to/files',
 	'password' => 'your-login',
+	'charset' => 'source-code-charset' /*optional*/
 	'exclude' => array(
 		'*/.git/*', 
 		'*/.*', 

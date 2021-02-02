@@ -363,17 +363,22 @@ class Diff{
   private static function getCellContent(
       $diff, $indentation, $separator, &$index, $type){
 
+    static $lineNo = 0;
+
     // initialise the HTML
     $html = '';
 
     // loop over the matching lines, adding them to the HTML
-    while ($index < count($diff) && $diff[$index][1] == $type){
+    while ($index < count($diff) && $diff[$index][1] == $type)
+    {
+      if ($type != self::DELETED) $lineNo++;
+
       $html .=
-          '<span>'
+          "<span title='line $lineNo'>"
           . htmlspecialchars($diff[$index][0])
           . '</span>'
           . $separator;
-      $index ++;
+      $index++;
     }
 
     // return the HTML

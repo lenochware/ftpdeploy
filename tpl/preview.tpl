@@ -83,6 +83,8 @@ function init()
       $(this).closest('tr').toggleClass("selected", $(this).prop('checked'));
   });
 
+  $('body').on('keydown', scrollDiv);
+  
 }
 
 $(document).ready(init);
