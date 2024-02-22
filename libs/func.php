@@ -7,8 +7,8 @@ function now() {
 
 function sanitize($s, $type) {
   $pattern = array(
-  	'alphanum' => '/[a-zA-Z0-9]+/',
-  	'file-id' => '/[.-_a-zA-Z0-9]+/',
+  	'alphanum' => '/\w+/i',
+  	'file-id' => '/[\w\._-]+/i',
   );
   if (!$pattern[$type]) throw new Exception("Unknown type '$type'");
   $s= preg_match($pattern[$type], $s, $matches);

@@ -284,7 +284,12 @@ protected function getTasks()
 {
   $tasks = array();
   foreach(glob('./config/*') as $fileName) {
-    $tasks[]['TASK'] = extractPath($fileName, "%f");
+    if (is_dir($fileName)) {
+      $tasks[]['DIR'] = extractPath($fileName, "%f");
+    }
+    elseif(extractPath($fileName, "%e") == 'php') {
+      $tasks[]['TASK'] = extractPath($fileName, "%f");
+    }
   }
 
   return $tasks;
