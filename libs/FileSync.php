@@ -14,9 +14,6 @@ class FileSync
 	/** Occurs after copying a file. */ 
 	public $onAfterCopy;
 
-	/** Filter for list of files. Called for each file, return true/false. */ 
-	public $onFilter;
-
 	/**
 	 * Connect to remote server.
 	 * @param string $uri Example: 'ftp://user:password@ftp.host.com/path/to/files'
@@ -99,63 +96,60 @@ class FileSync
 	 */
 	function getList($directory, $options = array())
 	{
-		$recursive = isset($options['recursive'])? $options['recursive'] : true;
-		$directory = $this->normalizeDir($directory).'/';
+		if (!is_dir($directory)) return [];
+		//$directory = $this->normalizeDir($directory);
 
-		if ($recursive) {
-			$it = new RecursiveIteratorIterator(
-				new RecursiveDirectoryIterator($directory)
-			);
+		//fix patterns
+		foreach ((array)$options['exclude'] as $i => $value) {
+			if (substr($value,-2) == '/*') $options['exclude'][$i] = substr($value, 0, -2);
 		}
-		else {
-			$it = new DirectoryIterator($directory);
+
+		foreach ((array)$options['include'] as $i => $value) {
+			if (substr($value,-2) == '/*') $options['include'][$i] = substr($value, 0, -2);
 		}
+
+		$root = $this->normalizeDir($directory).'/';
 
 		$files = array(
 			'sourcedir' => $directory,
-			'files' => array(),
+			'files' =>$this->scanDirectory($root, $directory, $options),
 		);
 
-		foreach ($it as $file) {
-			if (!$this->filterFunc($file, $options)) continue;
-			$files['files'][] = str_replace($directory, '', $this->getPath($file));
+		return $files;
+	}
+
+	protected function scanDirectory($root, $dir, $options)
+	{
+		$files = [];
+		$objects = scandir($dir);
+
+		foreach ($objects as $object)
+		{
+			if ($object == "." or $object == "..") continue;
+			$path = $dir . '/' . $object;
+
+			if ($this->exclude($path, $options)) continue;
+
+			if (is_file($path)) {
+				$files[] = str_replace($root, '', $path);
+			} elseif (is_dir($path)) {
+				// Rekurzivně voláme stejnou funkci pro podadresář
+				$files = array_merge($files, $this->scanDirectory($root, $path, $options));
+			}	
 		}
 
 		return $files;
 	}
-	
-	protected function filterFunc(SplFileInfo $file, $options)
-	{
-		if ($this->onFilter) {
-			return $this->fireEvent('onFilter', array($file, $options));
-		}
-		else {
-			return $this->defaultFilter($file, $options);
-		}
-	}
 
-	/**
-	 * Default include/exclude filter.
-	 * Called for each file of the list, return true if file match criteria.
-	 * By default it uses include/exclude criteria from project configuration file.
-	 * @return boolean Pass filter
-	 */
-	public function defaultFilter(SplFileInfo $file, $options)
+	protected function exclude($path, $options)
 	{
 		$include = $options['include'];
 		$exclude = $options['exclude'];
-		$tmin = $options['modified-after'];
-
-		if ($exclude and $this->inPattern($exclude, $this->getPath($file))) return false;
-		if ($include and !$this->inPattern($include, $this->getPath($file))) return false;
-		if ($tmin and $file->getMTime() < $tmin) return false;
 		
-		return $file->isFile();
-	}
-
-	private function getPath(SplFileInfo $file)
-	{
-		return $this->normalizeDir($file->getPathname());
+		if ($exclude and $this->inPattern($exclude, $path)) return true;
+		if ($include and !$this->inPattern($include, $path)) return true;
+		
+		return false;
 	}
 
 	private function inPattern($patterns, $path)
@@ -271,43 +265,4 @@ class FtpDriver
 
 } //FtpDriver
 
-/*
-class LocalDriver
-{
-	protected $connection;
-	protected $rootDir;
-
-	function __construct($datasource)
-	{
-		$this->connect($datasource);
-	}
-
-	function connect($datasource)
-	{
-		$this->rootDir = $datasource['path'];
-		if (!file_exists($this->rootDir)) {
-			throw new Exception("Cannot found path '$this->rootDir'");
-		}
-	}
-
-	function disconnect() {}
-
-	function copyFile($from, $to)
-	{
-		$ok = @copy($from, $this->rootDir.'/'.$to);
-		return $ok;
-	}
-
-
-	public function mkDir($directory)
-	{
-		mkdir($this->rootDir.'/'.$directory, 0777, true);
-  }
-
-	public function isDir($directory) {
-		return is_dir($this->rootDir.'/'.$directory);
-	}
-
-} //LocalDriver
-*/
 ?>
