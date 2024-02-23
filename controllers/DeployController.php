@@ -32,7 +32,7 @@ function initAction($task)
   $config = include('./config/'.$task.'.php');
   $fs = new FileSync;
   $files = $fs->getList($config['local'], $config);  
-  $hashes = $this->createHashArray($files);
+  $hashes = $this->createHashArray($files, true);
 
   if ($_POST['save']) {
     file_put_contents('./data/'.$task.'.md5', json_encode($hashes));
@@ -83,10 +83,6 @@ function previewAction($task)
   $grid->values['HOST'] = $datasource['host'];
   $grid->values['REMOTEDIR'] = $datasource['path'];
 
-  if (!count($data)) {
-   // $grid->form->_commit->noedit = 1;    
-  }
-
   return $grid;
 }
 
@@ -102,7 +98,7 @@ function skipAction($task)
     list($fileName, $status) = explode(' ', $row['FILE']);
 
     if (file_exists($sourcedir.'/'.$fileName)) {
-      $hashes[$fileName] = md5_file($sourcedir.'/'.$fileName);
+      $hashes[$fileName] = $this->hash($sourcedir.'/'.$fileName);
     }
     else {
       unset($hashes[$fileName]);
@@ -166,9 +162,14 @@ function remoteCopy($fs, $modified, &$hashes)
     $this->result[$status]++;
 
     if ($ok) {
-      $hashes[$fileName] = md5_file($modified['sourcedir'].'/'.$fileName);
+      $hashes[$fileName] = $this->hash($modified['sourcedir'].'/'.$fileName);
     }
   }
+}
+
+protected function hash($path, $withMd5 = true)
+{
+  return [filemtime($path), $withMd5? md5_file($path) : ''];
 }
 
 function remoteDelete($fs, $deleted, &$hashes)
@@ -237,11 +238,20 @@ protected function getDiff($sourceDir, $savedHashes, $hashes)
     $savedHash = $savedHashes[$fileName];
     unset($savedHashes[$fileName]);
 
-    if ($savedHash == $hash) continue;
+    if (is_array($savedHash)) {
+      if ($savedHash[0] == $hash[0]) continue;
+      $hash = $this->hash($sourceDir.'/'.$fileName);
+      if ($savedHash[1] == $hash[1]) continue;
+    }
+    else {
+      $hash = $this->hash($sourceDir.'/'.$fileName);
+      if ($savedHash == $hash[1]) continue;
+    }
+
     $row = array();
     $row['FILENAME'] = $fileName;
     $row['STATUS'] = $savedHash? 'modified' : 'created';
-    $diffArray[] = $row; 
+    $diffArray[] = $row;
   }
 
   foreach ($savedHashes as $fileName => $hash) {
@@ -265,7 +275,7 @@ protected function saveHashFile($task, $hashes)
   file_put_contents('./data/'.$task.'.md5', json_encode($hashes));  
 }
 
-protected function createHashArray($files)
+protected function createHashArray($files, $withMd5 = false)
 {
   $hashes = array();
   $sourceDir = $files['sourcedir'];
@@ -274,7 +284,7 @@ protected function createHashArray($files)
     if (!file_exists($sourceDir.'/'.$fileName)) {
       $app->message("File '$fileName' not found.", 'warning');
     }
-    $hashes[$fileName] = md5_file($sourceDir.'/'.$fileName);
+    $hashes[$fileName] = $this->hash($sourceDir.'/'.$fileName, $withMd5);
   }
 
   return $hashes;
