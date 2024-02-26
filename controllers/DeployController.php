@@ -29,19 +29,19 @@ function initAction($task)
 
   $task = sanitize($task, 'file-id');
 
-  $config = include('./config/'.$task.'.php');
+  $config = $this->getConfig($task);
   $fs = new FileSync;
   $files = $fs->getList($config['local'], $config);  
   $hashes = $this->createHashArray($files, true);
 
   if ($_POST['save']) {
-    file_put_contents('./data/'.$task.'.md5', json_encode($hashes));
+    $this->saveHashFile($task, $hashes);
     $this->app->message('Soubory byly přidány.');
     $this->logger->log('Init '.now()." Úloha inicializována.\n");
     $this->app->redirect('deploy/preview/task:'.$task);
   }
   elseif($_POST['no_save']) {
-    file_put_contents('./data/'.$task.'.md5', json_encode(array()));
+    $this->saveHashFile($task, []);
     $this->logger->log('Init '.now()." Úloha inicializována.\n");
     $this->app->redirect('deploy/preview/task:'.$task);    
   }
@@ -66,7 +66,7 @@ function previewAction($task)
     $this->app->redirect('deploy/init/task:'.$task);
   }
 
-  $config = include('config/'.$task.'.php');
+  $config = $this->getConfig($task);
   $fs = new FileSync;
   $files = $fs->getList($config['local'], $config);
 
@@ -90,7 +90,7 @@ function skipAction($task)
 {
   $rows = (array)$_POST['rowdata'];
   $task = sanitize($task, 'file-id');
-  $config = include('config/'.$task.'.php');  
+  $config = $this->getConfig($task);
   $hashes = $this->loadHashFile($task);
   $sourcedir = $config['local'];
 
@@ -117,7 +117,7 @@ function commitAction($task)
 
   $data = $_POST['data'];
   $task = sanitize($task, 'file-id');
-  $config = include('config/'.$task.'.php');
+  $config = $this->getConfig($task);
   if ($config['password'] != $data['PASSWORD']) {
     $this->app->error('Chybné heslo.');
   }
@@ -270,6 +270,11 @@ protected function loadHashFile($task)
   return file_exists($hashFile)? json_decode(file_get_contents($hashFile), true) : array();
 }
 
+protected function getConfig($task)
+{
+  return include('config/'.$task.'.php');
+}
+
 protected function saveHashFile($task, $hashes)
 {
   file_put_contents('./data/'.$task.'.md5', json_encode($hashes));  
@@ -281,9 +286,9 @@ protected function createHashArray($files, $withMd5 = false)
   $sourceDir = $files['sourcedir'];
 
   foreach ($files['files'] as $fileName) {
-    if (!file_exists($sourceDir.'/'.$fileName)) {
-      $app->message("File '$fileName' not found.", 'warning');
-    }
+    // if (!file_exists($sourceDir.'/'.$fileName)) {
+    //   $app->message("File '$fileName' not found.", 'warning');
+    // }
     $hashes[$fileName] = $this->hash($sourceDir.'/'.$fileName, $withMd5);
   }
 
