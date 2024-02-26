@@ -19,7 +19,8 @@ function indexAction() {
 
 function historyAction($task)
 {
-  return '<pre>'.@file_get_contents('./data/log/'.$task.'.log').'</pre>';
+  $script = "<script> window.scrollTo(0, document.body.scrollHeight); </script>";
+  return '<pre>'.@file_get_contents('./data/log/'.$task.'.log').'</pre>' . $script;
 }
 
 /** Run if no deploy has been done yet - add files to monitoring. */

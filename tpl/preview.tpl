@@ -7,6 +7,7 @@ input PASSWORD password
 bind STATUS_TEXT list "modified,změna,deleted,smazáno,created,vytvořeno,unwatch,dál nesledovat" field "STATUS"
 button commit lb " Publikovat" tag "button" glyph "fa fa-flag"
 button skip lb "Přeskočit..." tag "button" confirm "Označit jako nahrané?"
+link history route "deploy/history/task:{TASK}/popup:1" lb "Historie" popup
 pager pager pglen "10000"
 ?>
 <style>
@@ -66,7 +67,7 @@ Celkem {TOTAL} souborů.
 	<td>{PASSWORD}</td>
 </tr>
 <tr>
-	<td colspan="2">{commit} {skip}</td>
+	<td colspan="2">{commit} {skip} &nbsp; {history}</td>
 	<td></td>
 </tr>
 </table>
