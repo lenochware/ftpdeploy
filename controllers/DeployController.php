@@ -82,6 +82,11 @@ function previewAction($task)
 
   $datasource = parse_url($config['remote']);
   $grid->values['HOST'] = $datasource['host'];
+
+  if ($datasource['scheme'] =='ftps') {
+    $grid->values['FTPS'] = 'ftps';
+  }
+
   $grid->values['REMOTEDIR'] = $datasource['path'];
 
   return $grid;
