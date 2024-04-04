@@ -1,6 +1,11 @@
 <?elements
+class grid
+string TITLE
+string TASK
+string DIR
 link lnpreview route "deploy/preview/task:{TASK}"
 link lnhistory route "deploy/history/task:{TASK}/popup:1" lb "historie" popup
+pager pager
 ?>
 
 <h2>{TITLE}</h2>

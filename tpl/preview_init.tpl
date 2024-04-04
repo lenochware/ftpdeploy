@@ -1,5 +1,8 @@
 <?elements
 class grid name "preview_init"
+string TASK
+string FILENAME
+string TOTAL
 pager pager pglen "10000"
 ?>
 <form action="?r=deploy/init&task={TASK}" method="post">

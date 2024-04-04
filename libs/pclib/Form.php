@@ -1340,7 +1340,7 @@ protected function head()
 	else
 		$tag['method'] = 'post';
 
-	if ($this->header['csrf']) $hidden['csrf_token'] = $this->getCsrfToken();
+	if (!empty($this->header['csrf'])) $hidden['csrf_token'] = $this->getCsrfToken();
 	$hidden['submitted'] = $this->name;
 	if ($action) $tag['action'] = $this->header['action'] = $action;
 

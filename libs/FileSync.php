@@ -100,11 +100,11 @@ class FileSync
 		//$directory = $this->normalizeDir($directory);
 
 		//fix patterns
-		foreach ((array)$options['exclude'] as $i => $value) {
+		foreach (array_get($options, 'exclude', []) as $i => $value) {
 			if (substr($value,-2) == '/*') $options['exclude'][$i] = substr($value, 0, -2);
 		}
 
-		foreach ((array)$options['include'] as $i => $value) {
+		foreach (array_get($options, 'include', []) as $i => $value) {
 			if (substr($value,-2) == '/*') $options['include'][$i] = substr($value, 0, -2);
 		}
 
@@ -143,8 +143,8 @@ class FileSync
 
 	protected function exclude($path, $options)
 	{
-		$include = $options['include'];
-		$exclude = $options['exclude'];
+		$include = array_get($options, 'include', []);
+		$exclude = array_get($options, 'exclude', []);
 		
 		if ($exclude and $this->inPattern($exclude, $path)) return true;
 		if ($include and !$this->inPattern($include, $path)) return true;

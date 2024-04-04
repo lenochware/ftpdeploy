@@ -1,11 +1,16 @@
 <?elements
 class gridform name "preview" route "deploy/task:{GET.task}"
 env GET
+primary ID
 check SEL default "1"
 input COMMENT size "100"
 input PASSWORD password
 string HOST
 string FTPS
+string TOTAL
+string REMOTEDIR
+string FILENAME
+string STATUS
 bind STATUS_TEXT list "modified,změna,deleted,smazáno,created,vytvořeno,unwatch,dál nesledovat" field "STATUS"
 button commit lb " Publikovat" tag "button" glyph "fa fa-flag"
 button skip lb "Přeskočit..." tag "button" confirm "Označit jako nahrané?"
