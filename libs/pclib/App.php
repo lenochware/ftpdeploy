@@ -43,30 +43,13 @@ public $layout;
 public $services = array();
 
 /** Current environment (such as 'develop','test','production'). */
-public $environment;
+public $environment = '';
 
 /** Enabling debugMode will display debug-toolbar. */
 public $debugMode = false;
 
-public $indexFile = 'index.php';
-
 /** var ErrorHandler */
 public $errorHandler;
-
-/** Occurs when App.error() method is called. */ 
-public $onError;
-
-/** Occurs before loading and running Controller. */ 
-public $onBeforeRun;
-
-/** Occurs after Controller has been executed. */ 
-public $onAfterRun;
-
-/** Occurs before application output. */ 
-public $onBeforeOut;
-
-/** Occurs after application output. */ 
-public $onAfterOut;
 
 public $plugins;
 
@@ -81,20 +64,21 @@ function __construct($name)
 	$this->name = $name;
 	$pclib->app = $this;
 
-	system\BaseObject::defaults('serviceLocator', array($this, 'getService'));
+	system\BaseObject::defaults('serviceLocator', [$this, 'getService']);
+	$this->serviceLocator = [$this, 'getService'];
 
 	$this->errorHandler = new system\ErrorHandler;
 	$this->errorHandler->register();
 
 	$this->paths = $this->getPaths();
 
-	$this->environmentIp(
-		array(
+	if (!$this->environment) {
+		$this->environmentIp([
 			'127.0.0.1' => 'develop',
 			'::1' => 'develop',
 			'*' => 'production',
-		)
-	);
+		]);
+	}
 
 	$this->addConfig( PCLIB_DIR.'Config.php' );
 }
@@ -160,7 +144,7 @@ function setLayout($path)
  */
 function log($category, $message_id, $message = null, $item_id = null)
 {
-	$logger = $this->services['logger'];
+	$logger = array_get($this->services,'logger');
 	if (!$logger) return;
 	return $logger->log($category, $message_id, $message, $item_id);
 }
@@ -170,7 +154,13 @@ function log($category, $message_id, $message = null, $item_id = null)
  * @param string $serviceName
  * @return IService $service
  */
-protected function createDefaultService($serviceName) {
+protected function createDefaultService($serviceName)
+{
+
+	if ($serviceName == 'events') {
+		return new pclib\EventManager;
+	}
+
 	$canBeDefault = array('logger', 'debugger', 'request', 'router');
 	if (in_array($serviceName, $canBeDefault)) {
 		$className = '\\pclib\\'.ucfirst($serviceName);
@@ -277,14 +267,26 @@ public function configure()
 	global $pclib;
 	$this->errorHandler->options = $this->config['pclib.errors'];
 
-	if ($this->config['pclib.logger']['log']) {
-		$this->logger->categories = $this->config['pclib.logger']['log'];
-	}
 	foreach ($this->config['pclib.directories'] as $k => $dir) {
-		$this->config['pclib.directories'][$k] = paramstr($dir, $this->paths);
+		$this->config['pclib.directories'][$k] = Str::format($dir, $this->paths);
 	}
-	if ($this->config['pclib.compatibility']['legacy_classnames']) {
-		$pclib->autoloader->addAliases($pclib->legacyAliases);
+
+	$c = $this->config['pclib.app'];
+
+	if (!empty($c['db'])) $this->db = new pclib\Db($c['db']);
+	if (!empty($c['logger'])) $this->logger = new pclib\Logger();
+	if (!empty($c['file-storage'])) $this->fileStorage = new pclib\FileStorage($c['file-storage']);
+	if (!empty($c['language'])) $this->setLanguage($c['language']);
+	if (!empty($c['debugbar'])) $this->debugMode = true;
+	if (!empty($c['friendly-url'])) $this->router->friendlyUrl = true;
+	if (!empty($c['layout'])) $this->setLayout($c['layout']);
+
+	if (!empty($c['auth'])) {
+		if (is_string($c['auth'])) {
+			$this->auth = new pclib\Auth(new pclib\Db($c['auth']));
+		} else {
+			$this->auth = new pclib\Auth();
+		}
 	}
 }
 
@@ -292,35 +294,20 @@ public function configure()
  * Perform redirect to $route.
  * Example: $app->redirect("products/edit/id:$id");
  * @param string|array $route
- * @param htttp code (e.g. 301 Moved Permanently)
+ * @param http code (e.g. 301 Moved Permanently)
  * See also @ref pcl-route
  */
 function redirect($route, $code = null)
 {
-
-	if ($code and function_exists('http_response_code')) {
-		http_response_code($code);
-	}
-
-	if (is_array($route)) {
-		$url = $route['url'];
-	}
-	else {
-		$url = $this->router->createUrl($route);
-	}
-
-	header("Location: $url");
-	exit();
+	$this->router->redirect($route, $code);
 }
 
 /**
  * Initialize application Translator and enable translation to the $language.
  * You can access current language as $app->language.
  * @param string $language Language code such as 'en' or 'source'.
- * @param bool $useDefault Preload default texts?
- * @param bool $useFile Try load texts from php file?
  */
-function setLanguage($language, $useDefault = true, $useFile = true)
+function setLanguage($language)
 {
 	$trans = new Translator($this->name);
 	$trans->language = $language;
@@ -328,16 +315,15 @@ function setLanguage($language, $useDefault = true, $useFile = true)
 	if ($language == 'source') {
 		$trans->autoUpdate = true;
 	}
-	elseif($useFile) {
+	else {
 		$transFile = $this->config['pclib.directories']['localization'].$language.'.php';
 		if (file_exists($transFile)) $trans->useFile($transFile);
-		else throw new FileNotFoundException("Translator file '$transFile' not found.");
 	}
 
-	if ($useDefault) {
+	if (!empty($this->services['db'])) {
 		try {
 			$trans->usePage('default');
-		} catch (Exception $e) {
+		} catch (\Exception $e) {
 			throw new Exception('Cannot load texts for translator - '.$e->getMessage());
 		}
 
@@ -359,7 +345,8 @@ private function normalizeDir($s)
 
 function getPaths()
 {
-	$webroot = str_replace($_SERVER['SCRIPT_NAME'], '', $_SERVER['SCRIPT_FILENAME']);
+	//$webroot = str_replace($_SERVER['SCRIPT_NAME'], '', $_SERVER['SCRIPT_FILENAME']);
+	$webroot = $_SERVER['DOCUMENT_ROOT'];
 
 	return array(
 		'webroot' => $this->normalizeDir($webroot),
@@ -374,23 +361,25 @@ function getPaths()
 /** Replace path variables e.g. {basedir} */
 function path($path)
 {
-	return paramStr($path, $this->paths);
+	return Str::format($path, $this->paths);
 }
 
 /**
  * Translate string $s.
  * Uses Translator service if present, otherwise return unmodified $s.
- * Example: $app->t('File %%s not found.', $fileName);
+ * Example: $app->text('File %%s not found.', $fileName);
  * @param string $s String to be translated.
  * @param mixed $args Variable number of arguments.
  */
-function t($s)
+function text($s)
 {
 	$translator = array_get($this->services, 'translator');
 	if ($translator) $s = $translator->translate($s);
 	$args = array_slice(func_get_args(), 1);
-	if ($args) {
-		if (is_array($args[0])) $args = $args[0];
+	
+	if (!empty($args) and is_array($args[0])) $args = $args[0];
+
+	if ($args and strpos($s, '%') !== false) {
 		$s = vsprintf ($s, $args);
 	}
 	return $s;
@@ -413,27 +402,16 @@ function message($message, $cssClass = null)
 }
 
 /**
- * Display warning message.
- * @deprecated Use app->message($message, 'warning');
- * @see message()
- **/
-function warning($message, $cssClass = null)
-{
-	$args = array_slice(func_get_args(), 2);
-	$this->layout->addMessage($message, $cssClass? $cssClass : 'warning', $args);
-}
-
-/**
  * Display error message and exit application.
  * @see message()
  **/
 function error($message, $cssClass = null)
 {
 	$args = array_slice(func_get_args(), 2);
-	$message = vsprintf($this->t($message), $args);
+	$message = $this->text($message, $args);
 	if (!$cssClass) $cssClass = 'error';
 
-	$event = $this->onError($message);
+	$event = $this->trigger('app.error', ['message' => $message]);
 	if ($event and !$event->propagate) return;
 
 	$this->setContent('<div class="'.$cssClass.'">'.$message.'</div>');
@@ -447,12 +425,10 @@ function error($message, $cssClass = null)
  **/
 function httpError($code, $message, $cssClass = null)
 {
-	if (function_exists('http_response_code')) {
-		http_response_code($code);
-	}
+	http_response_code($code);
 
 	$args = array_slice(func_get_args(), 3);
-	$message = vsprintf($this->t($message), $args);
+	$message = $this->text($message, $args);
 	$this->error($message, $cssClass);
 }
 
@@ -470,11 +446,16 @@ function httpError($code, $message, $cssClass = null)
 function getSession($name, $ns = null)
 {
 	if (!$ns) $ns = $this->name;
+	if (!isset($_SESSION[$ns])) return null;
+
+	//because of retarded "key does not exists warning"
 	if (strpos($name, '.')) {
 		list($n1,$n2) = explode('.', $name);
-		return @$_SESSION[$ns][$n1][$n2];
+		if (!isset($_SESSION[$ns][$n1])) return null;
+		return array_get($_SESSION[$ns][$n1], $n2);
 	}
-	return @$_SESSION[$ns][$name];
+
+	return array_get($_SESSION[$ns], $name);
 }
 
 /**
@@ -487,6 +468,7 @@ function getSession($name, $ns = null)
 function setSession($name, $value, $ns = null)
 {
 	if (!$ns) $ns = $this->name;
+	//if (!isset($_SESSION[$ns])) return;
 	if (strpos($name, '.')) {
 		list($n1,$n2) = explode('.', $name);
 		$_SESSION[$ns][$n1][$n2] = $value;
@@ -518,17 +500,20 @@ function deleteSession($name = null, $ns = null)
 
 function newController($name, $module = '')
 {
-	$postfix = 'Controller';
-	$className = ucfirst($name).$postfix;
+	$className = ucfirst($name).'Controller';
 	$moduleDir = $module? "{modules}/$module/" : '';
 	$namespace = $module? "\\$module\\" : '';
+	$fullClassName = $namespace.$className;
 
 	$path = $this->path("$moduleDir{controllers}/$className.php");
 	
-	if (!file_exists($path)) throw new Exception("File '$path' not found.");
+	if (file_exists($path)) {
+		require_once($path);
+	}
+	else {
+		if (!class_exists($fullClassName)) return null;
+	}
 
-	require_once($path);
-	$fullClassName = $namespace.$className;
 	return new $fullClassName($this);
 }
 
@@ -550,18 +535,30 @@ function run($rs = null)
 	if ($rs) {
 		$this->router->action = new Action($rs);
 	}
+
+	if (!$this->router->action->controller) {
+		$default = array_get($this->config['pclib.app'], 'default-route');
+		if ($default) {
+			$this->router->action = new Action($default);
+		}
+	}
 	
 	$action = $this->router->action;
+	
 
-	$event = $this->onBeforeRun();
+	$event = $this->trigger('app.before-run', ['action' => $action]);
 	if ($event and !$event->propagate) return;
 
 	$ct = $this->newController($action->controller, $action->module);
-	if (!$ct) $this->httpError(404, 'Page not found: "%s"', null, $action->controller);
+
+	if (!$ct) {
+		$ct = $this->newController('base');
+		if (!$ct) $this->httpError(404, 'Page not found: "%s"', null, $action->controller);
+	}
 
 	$html = $ct->run($action);
 
-	$event = $this->onAfterRun();
+	$event = $this->trigger('app.after-run', ['action' => $action]);
 	if ($event and $event->propagate) return;
 
 	$this->setContent($html);
@@ -575,12 +572,12 @@ function run($rs = null)
  **/
 function out()
 {
-	$event = $this->onBeforeOut();
+	$event = $this->trigger('app.before-out');
 	if ($event and !$event->propagate) return;
 
 	if (!$this->layout) throw new NoValueException('Cannot show output: app->layout does not exists.');
 	$this->layout->out();
-	$this->onAfterOut();
+	$this->trigger('app.after-out');
 }
 
 }

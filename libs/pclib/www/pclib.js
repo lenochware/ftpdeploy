@@ -16,7 +16,7 @@
 */
 
 /* Namespace for pclib functions. */
-var pclib = {
+const pclib = {
 
 xhr: null,
 
@@ -26,7 +26,6 @@ onAjaxComplete: null,
 /** Occurs when form is validated. */
 onValidate: null,
 
-ajax_id: null,
 modalWin: null,
 
 strings: {
@@ -36,7 +35,8 @@ strings: {
 	'form-err-passw'  : ' Nevalidní heslo!',
 	'form-err-file'   : ' Chybný typ souboru!',
 	'form-err-req'    : ' Pole je povinné!',
-	'form-err-pattern' : ' Chybně zadaná hodnota!'
+	'form-err-pattern' : ' Chybně zadaná hodnota!',
+	'form-err-maxfilesize' : ' Překročena maximální povolená velikost souboru!'
 },
 
 /** @private */
@@ -55,6 +55,7 @@ getFormElements: function(form) {
 		};
 
 		elem.value = this.getValue(elem.id);
+		elem.object = document.getElementById(elem.id);
 
 		elements.push(elem);
 	}
@@ -130,11 +131,26 @@ validateForm: function(form) {
 			case 'file':
 				var result = false;
 				var patterns = elem.options.split(';');
-				for (var j in patterns) {
+				for (var j in patterns)
+				{
+					if (!isNaN(parseFloat(patterns[j]))) { /* isNumeric */
+						if (!this._validateFileSize(elem.object, patterns[j])) {
+							elem.message = 'form-err-maxfilesize';
+							break;
+						}
+						continue;
+					}
+
 					if (elem.value.match('^' + patterns[j] + '$')) {result = true; break;}
 				}
-				if (!result) {
+
+				if (!this._validateFileType(elem.object)) {
+					result = false;
 					elem.message = 'form-err-file';
+				}
+
+				if (!result) {
+					if (!elem.message) elem.message = 'form-err-file';
 					isValid = false;
 				}
 				break;
@@ -149,6 +165,38 @@ validateForm: function(form) {
 	}
 
 	return {isValid: isValid, elements: elements};
+},
+
+_validateFileSize: function(input, size_mb)
+{
+	for (var j in input.files) {
+		if (input.files[j].size > size_mb * 1024 * 1024) return false;
+	}
+
+	return true;
+},
+
+_validateFileType: function(input)
+{
+	if (!input.accept) return true;
+
+	const accept = input.accept.split(',');
+	const type = input.files[0].type;
+	const ext = input.files[0].name.split('.').pop();
+
+	for (let j in accept) {
+		let pattern = accept[j].trim();
+		if (pattern.charAt(0) == '.') {
+			if (pattern == ('.' + ext)) return true;
+		}
+		else {
+		 let regexPattern = pattern.replace(/\*/g, '.*');
+  		 let regex = new RegExp(`^${regexPattern}$`);
+         if (regex.test(type)) return true;
+		}
+	}
+
+	return false;
 },
 
 /**
@@ -211,56 +259,50 @@ getValue: function (id) {
 	return false;
 },
 
-/** @private */
-ajaxLoad: function (elem, url) {
-	if (!this.xhr) this.xhr = new XMLHttpRequest();
-	this.xhr.onreadystatechange = function(){
-		if (this.readyState!=4 || this.status!=200) return;
-		elem.innerHTML = this.responseText;
-	};
-	this.xhr.open('GET', url, true);
-	this.xhr.send();
+fetchLink: async function(e) {
+	e.stopPropagation();
+	e.preventDefault();
+	const response = await fetch(this.href, {method: 'GET'});
+	const text = await response.text();
+ 	
+	if (!text) return;
+
+	const data = JSON.parse(text);
+	pclib._updateDom(this, data);
+	pclib.initLinks();
+
+	//alert(response.ok);
 },
 
-/**
- * Invoke ajax request - used by element's attribute ajaxget.
- *
- * @param {string} name template name
- * @param {string} id id of calling element
- * @param {string} url URL called by ajax. Should contain calling of function form->ajaxsync()
- * @param {string} params Comma separated list of elements' id for synchronization
- */
-ajaxGet: function (name, id, url, params) {
-	if (!this.xhr) this.xhr = new XMLHttpRequest();
+fetch: async function(url) {
+	const response = await fetch(url, {method: 'GET'});
+	const text = await response.text();
+ 	
+	if (!text) return;
 
-	params += ',' + id;
-	var paramsArray = params.split(',');
-	var data = '&submitted='+name;
-	for (var i in paramsArray) {
-		data += '&data[' + paramsArray[i] + ']=' + this.getValue(paramsArray[i]);
-	}
-
-	this.ajax_id = id;
-	var self = this;
-	this.xhr.onreadystatechange = function() { self.ajaxSync(); };
-	this.xhr.open('GET', url + data,true);
-	this.xhr.send();
+	const data = JSON.parse(text);
+	pclib._updateDom(this, data);
+	pclib.initLinks();
 },
 
-/**
- * Callback function for ajaxGet() - load data from the server.
- * @private
- */
-ajaxSync: function() {
-	if (this.xhr.readyState!=4 || this.xhr.status!=200) return;
-	if (!this.xhr.responseText) return;
-	var responseArray = JSON.parse(this.xhr.responseText);
-	for (var id in responseArray) {
-		var elem = document.getElementById(id);
-		if (!elem) continue;
-		elem.innerHTML = responseArray[id];
+_updateDom: function(self, data) {
+	for(id in data) {
+		let elem = (id == 'self')? self : document.getElementById(id);
+
+		if (elem) {
+			elem.insertAdjacentHTML('afterend', data[id]);
+			elem.remove();
+		}
 	}
-	if (this.onAjaxComplete) this.onAjaxComplete(this.ajax_id);
+},
+
+initLinks: function()
+{
+	const links = document.querySelectorAll('a[data-method]');
+	links.forEach(function(elem) {
+		elem.onclick = pclib.fetchLink;
+	});
+
 },
 
 /**
@@ -282,11 +324,14 @@ initTree: function(className) {
 	}
 },
 
-showModal: function(id, url) {
+showModal: async function(id, url) {
 	document.getElementById('pc-overlay').style.display='block';
 	this.modalWin = document.getElementById(id);
 	this.modalWin.style.display = 'block';
-	this.ajaxLoad(this.modalWin, url);
+
+	const response = await fetch(url, {method: 'GET'});
+	const text = await response.text();
+	this.modalWin.innerHTML = text;
 },
 
 hideModal: function() {

@@ -11,6 +11,7 @@
 namespace pclib\system\database;
 use pclib\DatabaseException;
 use pclib\NotImplementedException;
+use pclib\Str;
 
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -91,9 +92,14 @@ function quote($str)
 	return $this->connection->quote($str);
 }
 
+function quoteIdent($str)
+{
+	return '"'.Str::id($str).'"';
+}
+
 function escape($str, $type = 'string')
 {
-	if ($type == 'ident') return $this->quote(pcl_ident($str));
+	if ($type == 'ident') return $this->quoteIdent($str);
 	if (!$str or is_numeric($str)) return $str;
 	return substr($this->connection->quote($str),1,-1);
 }

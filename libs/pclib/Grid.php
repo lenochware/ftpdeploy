@@ -66,12 +66,6 @@ protected $page;
 
 private $hash;
 
-/** Occurs before output of the row. */
-public $onBeforeRow;
-
-/** Occurs after output of the row. */
-public $onAfterRow;
-
 /**
  * Initialization - must be called after load()
  */
@@ -104,7 +98,7 @@ protected function initPager()
 
 	if ($el['ul']) {
 		$pager->pattern = '%1$s%3$s%2$s';
-		$pager->patternItem = '<li class="%s">%s</li>';
+		$pager->patternItems = '<li class="%s">%s</li>';
 	}
 	if ($el['pglen']) {
 		$pager->setPageLen($el['pglen']);
@@ -144,13 +138,9 @@ protected function _out($block = null)
 {
 	$this->values['items'] = $this->getValues();
 
-	if ($this->config['pclib.compatibility']['tpl_syntax'] and !$this->elements['items']['else']) {
-		$empty = !$this->values['items'];
-		$this->elements['items']['noprint'] = $empty;
-		$this->elements['noitems']['noprint'] = !$empty;
-	}
-
+	$this->trigger('grid.before-out');
 	parent::_out($block);
+	$this->trigger('grid.after-out');
 	$this->saveSession();
 }
 
@@ -198,6 +188,10 @@ function setArray(array $dataArray, $totalLength = 0)
 	$this->setLength($totalLength ?: count($this->dataArray));
 }
 
+/**
+ * Set Selection $sel which will be used as datasource for the grid.
+ * @param orm\Selection $sel
+ */
 function setSelection(orm\Selection $sel)
 {
 	$this->setQuery($sel->getSql());
@@ -312,8 +306,8 @@ function print_Element($id, $sub, $value)
 			print $elem['lb']? $elem['lb']:$id;
 		return;
 	}
-	elseif ($sub == 'value') {
-		print $value;
+	elseif ($sub == 'value' or $sub == 'int_value' or $sub == 'string_value') {
+		parent::print_Element($id, $sub, $value);
 		return;
 	}
 
@@ -343,7 +337,6 @@ function print_Pager($id, $sub)
 	$pgid = $this->elements['pcl_document']['typelist']['pager'];
 	$el = $this->elements[$pgid];
 
-	if ($this->pager->getValue('maxpage') < 2 and !$el['nohide']) return;
 
 	if (!empty($this->values[$pgid])) {
 		print $this->values[$pgid];
@@ -394,7 +387,7 @@ function print_Sort($id, $sub)
 	if (!$this->renderSortIcons) return;
 	$imageDir = $this->config['pclib.directories']['assets'];
 	if (!$curId) $dir = 'no';
-	print "<img src=\"$imageDir/sort_$dir.gif\"".($this->useXhtml? ' />' : '>');
+	print "<img src=\"$imageDir/sort_$dir.gif\">";
 }
 
 /**
@@ -427,17 +420,21 @@ protected function getVariable($id)
 	$page = $this->pager->getValue('page');
 	$maxpage =  $this->pager->getValue('maxpage');
 
+	if (strpos($id, '_tvar_') === 0) {
+		$id = '@'.substr($id, 6);
+	}	
+
 	switch ($id) {
-		case '_tvar_first': 
-			$value = ($page == 1 and parent::getVariable('_tvar_top'))? '1':'0';
+		case '@block_first': 
+			$value = ($page == 1 and parent::getVariable('@block_top'))? '1':'0';
 		break;	
-		case '_tvar_last': 
-			$value = ($page == $maxpage and parent::getVariable('_tvar_bottom'))? '1':'0';
+		case '@block_last': 
+			$value = ($page == $maxpage and parent::getVariable('@block_bottom'))? '1':'0';
 		break;	
 		default: return parent::getVariable($id);
 	}
 	
-	return $this->escapeHtmlFunction($value);
+	return $value;
 }
 
 /**
@@ -538,7 +535,7 @@ protected function getQuery()
 		if ($lpos = stripos($sql, ' order by ')) $sql = substr($sql, 0, $lpos);
 		$orderby = '';
 		foreach($this->sortArray as $id => $sval) {
-			if (!$this->elements[$id]) {
+			if (empty($this->elements[$id])) {
 				unset($this->sortArray[$id]);
 				continue;
 			}
@@ -573,31 +570,45 @@ protected function getOrderByField($id)
 /**
  * Use default template for displaying database table content.
  */
-function create($tableName)
+function create($tableName, $templatePath = '')
 {
+	$this->service('db');
+	
 	$tableName = $this->db->tableName($tableName);
-	$this->createFromTable($tableName, PCLIB_DIR.'assets/default-grid.tpl');
+
+	if (!$templatePath) {
+		$templatePath = $this->defaultTemplatePath.'/default-grid.tpl';
+	}
+	
+	$this->createFromTable($tableName, $templatePath);	
 }
 
 /**
  * Return content of the grid as csv-text.
- * @param array $options [csv-separ: ';', csv-row-separ: "\r\n"]
+ * @param array $options [csv-separ: ';', csv-row-separ: "\n"]
  * @return string csv-text
  */
-function getExportCsv($options = [])
+function getExportCsv($options = [], $page = null)
 {
-	$this->pager->setPageLen($this->length);
+	if ($page) {
+		$this->pager->setPage($page);
+	}
+	else {
+		$page = 1;
+		$this->pager->setPageLen($this->length);
+	}
+
 	$elements = $this->elements;
 	$values = $this->getValues();
 	$this->values['items'] = $values;
 
-	$options += ['csv-separ' => ';', 'csv-row-separ' => "\r\n"];
-	
+	$options += ['csv-separ' => ';', 'csv-row-separ' => "\n", 'csv-enclosure' => '"'];
+	 
 	$ignore_list = array('class','block','pager','sort');
 
 	$elms = [];
 	foreach($this->elements as $id => $elem) {
-		if ($elem['noprint'] or $elem['skip'] or in_array($elem['type'], $ignore_list)) continue;
+		if (!empty($elem['noprint']) or !empty($elem['skip']) or in_array($elem['type'], $ignore_list)) continue;
 		unset($elem['title'], $elem['size']);
 		$elms[$id] = $elem;
 		$last_id = $id;
@@ -606,20 +617,40 @@ function getExportCsv($options = [])
 
 	ob_start();
 
-	foreach($elms as $id => $elem) {
-		print $elem['lb'] ?: $elem['id'];
-		if ($id != $last_id) print $options['csv-separ'];
+	if ($page == 1) {
+		foreach($elms as $id => $elem) {
+			print $elem['lb'] ?: $elem['id'];
+			if ($id != $last_id) print $options['csv-separ'];
+		}
 	}
+
 	print $options['csv-row-separ'];
 
 	foreach ($values as $i => $row) {
 		foreach($elms as $id => $elem) {
+
+			if (!isset($row[$id])) $row[$id] = '';
+
+			$quotes = false;
+			if (strpos($row[$id], $options['csv-enclosure']) !== false 
+				or strpos($row[$id], $options['csv-separ']) !== false 
+				or strpos($row[$id], $options['csv-row-separ']) !== false) {
+				$quotes = true;
+			}
+			
+			if ($quotes) {
+				print '"';
+				$row[$id] = str_replace('"', '""', $row[$id]);
+			}
+
 			if (!$this->fireEventElem('onprint',$id,'',$row[$id])) {
 			$this->print_Element($id, '', $row[$id]);
 			}
+
+			if ($quotes) print '"';
 			if ($id != $last_id) print $options['csv-separ'];
 		}
-		if($values[$i+1]) print $options['csv-row-separ'];
+		if(!empty($values[$i+1])) print $options['csv-row-separ'];
 	}
 
 	$this->elements = $elements;
@@ -637,10 +668,37 @@ function getExportCsv($options = [])
 function exportCsv($fileName, $options = array())
 {
 	ob_clean();
-	header('Content-type: text/csv');
+	header('Content-type: text/csv;charset=UTF-8');
 	header('Content-Disposition: attachment; filename="'.$fileName.'"');
-	print $this->getExportCsv($options);
+
+  $this->pager->setPageLen(min(1000, $this->length));
+  $pgCount = ceil($this->length / 1000);
+
+  for ($page = 1; $page <= $pgCount; $page++) {
+     print $this->getExportCsv($options, $page);
+  }
+
 	die();
+}
+
+/**
+ * Show download dialog for csv-file with content of the grid.
+ * @see getExportCsv()
+ */
+function exportExcel($fileName)
+{
+	header("Content-Type: application/vnd.ms-excel;charset=UTF-8");
+	header('Content-Disposition: attachment; filename="'.$fileName.'"');  
+  echo pack("CCC",0xef,0xbb,0xbf);
+
+  $this->pager->setPageLen(min(1000, $this->length));
+  $pgCount = ceil($this->length / 1000);
+
+  for ($page = 1; $page <= $pgCount; $page++) {
+     print $this->getExportCsv([], $page);
+  }
+
+  die();
 }
 
 /** get proper base url for %grid sort and pager & other links */
@@ -661,8 +719,8 @@ private function sumFieldEquals(array $sum)
 {
 	$rowno = $this->elements['items']['rowno'];
 	if ($this->sumArray['items']['pos'] > $sum['pos']) $rowno--;
-	$v1 = @$this->values['items'][$rowno][$sum['field']];
-	$v2 = @$this->values['items'][$rowno+1][$sum['field']];
+	$v1 = array_get($this->values['items'], [$rowno, $sum['field']]);
+	$v2 = array_get($this->values['items'], [$rowno+1, $sum['field']]);
 	if ($rowno == $this->pager->getValue('pglen')-1) $v2 = $this->sumArray['items']['last'][$sum['field']];
 	return ($v1 == $v2);
 }
@@ -670,7 +728,7 @@ private function sumFieldEquals(array $sum)
 protected function print_BlockRow($block, $rowno = null)
 {
 	if ($block == 'items' and isset($rowno)) {
-		$this->onBeforeRow($this->values[$block][$rowno], $rowno);
+		$this->trigger('grid.before-row', ['row' => $this->values[$block][$rowno], 'index' => $rowno]);
 	}
 
 	if ($this->sumArray and $block == 'items') {
@@ -694,7 +752,7 @@ protected function print_BlockRow($block, $rowno = null)
 	}
 
 	if ($block == 'items' and isset($rowno)) {
-		$this->onAfterRow($this->values[$block][$rowno], $rowno);
+		$this->trigger('grid.after-row', ['row' => $this->values[$block][$rowno], 'index' => $rowno]);
 	}
 }
 
@@ -703,10 +761,15 @@ protected function print_BlockRow($block, $rowno = null)
  */
 private function cmpFunc($id)
 {
-	$dir = ($id == $this->sortArray[$id])? '-1:+1' : '+1:-1';
-	$cmd = "if (\$a['$id'] == \$b['$id']) return 0;\n";
-	$cmd .= "return (\$a['$id'] < \$b['$id']) ? $dir;";
-	return create_function('$a,$b', $cmd);
+	$dir = ($id == $this->sortArray[$id])? 1 : -1;
+
+	$func = function($a, $b) use ($id, $dir)
+	{
+		if ($a[$id] == $b[$id]) return 0;
+		return ($a[$id] < $b[$id]) ? -1*$dir : $dir;
+	};
+
+	return $func;
 }
 
 } // end class

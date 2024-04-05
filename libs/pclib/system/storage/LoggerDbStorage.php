@@ -18,7 +18,8 @@ public $db;
 
 public $LOGGER_TAB   = 'LOGGER',
  $LABELS_TAB   = 'LOGGER_LABELS',
- $MESSAGES_TAB = 'LOGGER_MESSAGES';
+ $MESSAGES_TAB = 'LOGGER_MESSAGES',
+ $AUTH_USERS_TAB = 'AUTH_USERS';
 
 function __construct(\pclib\Logger $logger)
 {
@@ -62,10 +63,20 @@ function delete($keepDays, $allLogs = false)
 	$date = date('Y-m-d H:i:s', time() - ($keepDays * 24 * 3600));
 	if (!$allLogs) $logger = $this->getLabelId($this->logger->name,1);
 
-	$this->db->delete($this->LOGGER_TAB,
-	"DT<'{0}'
-	~ AND LOGGER='{1}'", $date, $logger);
-	$this->db->delete($this->MESSAGES_TAB, "DT<'{0}'", $date);
+	while(1) {
+		//Delete max 30k rows at once - avoid too long table lock
+		$stmt = $this->db->delete($this->LOGGER_TAB,
+		"DT<'{0}'
+		~ AND LOGGER='{1}'
+		LIMIT 30000", $date, $logger);
+		
+		if (!$stmt->rowCount()) break;
+		
+		$this->db->delete($this->MESSAGES_TAB, "DT<'{0}'", $date);
+	}
+
+	$this->db->query("OPTIMIZE TABLE $this->LOGGER_TAB");
+	$this->db->query("OPTIMIZE TABLE $this->MESSAGES_TAB");
 }
 
 
@@ -76,6 +87,8 @@ function delete($keepDays, $allLogs = false)
 function getLabelId($label, $category)
 {
 	$this->service('db');
+
+	$label = substr($label, 0, 80);
 	
 	list($id) = $this->db->select($this->LABELS_TAB.':ID',
 		"LABEL='{0}' AND CATEGORY='{1}'", $label, $category
@@ -98,28 +111,62 @@ function getLog($rowCount, array $filter = null)
 {
 	$this->service('db');
 
+	if (!empty($filter['ACTIONNAME'])) {
+		$found = $this->db->selectOne($this->LABELS_TAB.':ID', "CATEGORY=2 and LABEL like '%{ACTIONNAME}%'", $filter);
+		if ($found) $filter['ACTIONNAME'] = $found; else return [];
+	}
+
+	if (!empty($filter['CATEGORY'])) {
+		$found = $this->db->selectOne($this->LABELS_TAB.':ID', "CATEGORY=4 and LABEL like '%{CATEGORY}%'", $filter);
+		if ($found) $filter['CATEGORY'] = $found; else return [];
+	}
+
+	if (!empty($filter['USERNAME'])) {
+		$found = $this->db->selectOne('AUTH_USERS:ID', "USERNAME like '%{USERNAME}%'", $filter);
+		if ($found) $filter['USERNAME'] = $found; else return [];
+	}
+
 	$this->db->setLimit($rowCount);
 	$events = $this->db->selectAll(
 		"select L.*,LM.MESSAGE, U.USERNAME, U.FULLNAME, LL4.LABEL AS CATEGORY,
 		LL1.LABEL AS LOGGERNAME,LL2.LABEL AS ACTIONNAME,LL3.LABEL AS UA from $this->LOGGER_TAB L
-		left join AUTH_USERS U on U.ID=L.USER_ID
+		left join $this->AUTH_USERS_TAB U on U.ID=L.USER_ID
 		left join $this->LABELS_TAB LL1 on LL1.ID=L.LOGGER
 		left join $this->LABELS_TAB LL2 on LL2.ID=L.ACTION
 		left join $this->LABELS_TAB LL3 on LL3.ID=L.UA
 		left join $this->LABELS_TAB LL4 on LL4.ID=L.CATEGORY
 		left join $this->MESSAGES_TAB LM on LM.LOG_ID=L.ID
 		 where 1=1
-		~ AND L.CATEGORY='{CATEGORY}'
-		~ AND U.USERNAME like '{USERNAME}%'
-		~ AND LL2.LABEL like '{ACTIONNAME}%'
-		~ AND LL1.LABEL = '{LOGGERNAME}'
+		~ AND L.LOGGER = '{LOGGER}'
+		~ AND L.CATEGORY in ({#CATEGORY})
+		~ AND L.USER_ID in ({#USERNAME})
+		~ AND L.ACTION in ({#ACTIONNAME})
 		order by L.ID desc", $filter
 	);
+
 	foreach($events as $i => $tmp) {
 		$events[$i]['IP'] = long2ip($events[$i]['IP']);
 	}
 
 	return $events;
+}
+
+protected function getTableSize($tableName)
+{
+	$dbName = $this->db->dbName();
+	$size = $this->db->field(
+		"select round(((data_length + index_length) / 1024 / 1024), 2) 
+		FROM information_schema.TABLES 
+		WHERE table_schema = '{0}'
+		AND table_name = '{1}'", $dbName, $tableName
+	);
+
+	return $size;
+}
+
+function getSize()
+{
+	return $this->getTableSize('LOGGER') + $this->getTableSize('LOGGER_MESSAGES');
 }
 
 }

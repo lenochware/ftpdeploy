@@ -76,15 +76,19 @@ function getNavig($options = array())
 		$alt = '';
 		if (!$title) continue;
 
-		if (utf8_strlen($title) > 30) {
+		$title = Str::htmlspecialchars($title);
+
+		if (Str::length($title) > 30) {
 			$alt = 'title="'.$title.'"';
-			$title = utf8_substr($title, 0, 30). '...';
+			$title = Str::substr($title, 0, 30). '...';
 		}
 
+		$class = ($i == $maxlevel)? "pc-nav-$i pc-nav-active" : "pc-nav-$i";
+
 		if ($i == $maxlevel and !$options['lastlink'])
-			$navig[] = "<span $alt>$title</span>";
+			$navig[] = "<span $alt class=\"$class\">$title</span>";
 		else
-			$navig[] = "<a href=\"$url\" $alt>$title</a>";
+			$navig[] = "<a href=\"$url\" $alt class=\"$class\">$title</a>";
 
 	}
 
@@ -115,9 +119,10 @@ public function addScripts()
 	else $this->values[$id] = $scripts;
 }
 
-function addInline($s) 
+function addHeadText($s) 
 {
 	if (!$this->headTag) throw new NoValueException('Missing "head" tag in template.');
+	if (!isset($this->elements[$this->headTag]['inline'])) $this->elements[$this->headTag]['inline'] = ''; //suppress notice
 	$this->elements[$this->headTag]['inline'] .= $s;
 }
 
@@ -134,7 +139,7 @@ public function addMessage($message, $cssClass = null, $params = array())
 	if (!$this->messagesTag) throw new NoValueException('Missing "messages" tag in template.');
 	if (!$cssClass) $cssClass = 'message';
 	$flash = $this->app->getSession('pclib.flash');
-	$flash[$cssClass][] = $this->app->t($message, $params);
+	$flash[$cssClass][] = $this->app->text($message, $params);
 	$this->app->setSession('pclib.flash', $flash);
 }
 
@@ -144,33 +149,59 @@ public function addMessage($message, $cssClass = null, $params = array())
  */
 function print_Head($id, $sub, $value)
 {
-	$scripts = array();
+	$scripts = [];
+
 	if ($this->elements[$id]['scripts']) {
 		$scripts = array_merge($scripts, explode(',', $this->elements[$id]['scripts']));
 	}
+
 	if ($value) {
 		$scripts = array_merge($scripts, (array)$value);
-	}
+	}	
 
 	foreach(array_unique($scripts) as $script)
 	{	
-		$path = paramStr('{basedir}/'.$script, $this->app->paths);
-
-		if (!file_exists($path)) {
-			throw new FileNotFoundException("File '$path' not found.");
-		}
-		
-		$version = array_get($this->elements[$id], 'noversion')? '' : '?v='.filemtime($script);
-		$ext = substr($script, strrpos($script, '.'));
-		if ($script[0] != '/') $script = BASE_URL.$script;
-		switch($ext) {
-		case '.js': print "<script language=\"JavaScript\" src=\"$script$version\"></script>\n"; break;
-		case '.css': print "<link rel=\"stylesheet\" type=\"text/css\" href=\"$script$version\">\n"; break;
-		}
+		$this->printScriptLink($script);
 	}
 
 	$inline = array_get($this->elements[$id], 'inline');
 	if ($inline) print $inline;
+}
+
+protected function printScriptLink($src)
+{
+	$version = '';
+	$ext = substr($src, strrpos($src, '.'));
+
+	if ($this->isLocalFile($src))
+	{
+		$src = $this->app->path($src);
+
+		if ($src[0] != '/') $src = BASE_URL.$src;
+
+		$path = $this->app->paths['webroot'].$src;
+
+		if (!file_exists($path)) {
+			throw new FileNotFoundException("File '$path' not found.");
+		}		
+
+		$version = '?v='.filemtime($path);
+		$attr = '';
+	}
+	else {
+		$attr = ' crossorigin="anonymous"';
+	}
+
+	switch($ext) {
+		case '.js': print "<script src=\"$src$version\"$attr></script>\n"; break;
+		case '.css': print "<link href=\"$src$version\" rel=\"stylesheet\"$attr>\n"; break;
+	}
+}
+
+private function isLocalFile($src)
+{
+	$src = strtolower($src);
+	return !Str::startsWith($src, 'https://') and !Str::startsWith($src, '//');
 }
 
 /**
@@ -185,6 +216,15 @@ function print_Messages($id, $sub, $value)
 		print sprintf($this->MESSAGE_PATTERN, $cssClass, implode('<br>', $messages));
 	}
 	$this->app->setSession('pclib.flash', null);
+}
+
+protected function addJdump()
+{
+	$js = $this->app->getSession('pclib.jdump');
+	if ($js) {
+		$this->addHeadText("<script>$js</script>");
+		$this->app->setSession('pclib.jdump', null);		
+	}
 }
 
 /**
@@ -225,6 +265,7 @@ protected function _init()
 
 protected function _out($block = null)
 {
+	$this->addJdump();
 	parent::_out($block);
 	$this->saveSession();
 }

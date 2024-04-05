@@ -42,8 +42,6 @@ class ElementsDef extends BaseObject
 			'action' => null,
 			'route' => null,
 			'singlepage' => null,
-			'ajaxget' => null,
-			'ajax' => null,
 			'submitted' => null,
 			'noformtag' => null,
 			'table' => null,
@@ -70,7 +68,6 @@ class ElementsDef extends BaseObject
 			'columns' => null,
 			'noemptylb' => null,
 			'hint' => null,
-			'ajaxget' => null,
 			'hidden' => null,
 			'multiple' => null,
 		],
@@ -89,7 +86,6 @@ class ElementsDef extends BaseObject
 			'submit' => null,
 			'hint' => null,
 			'hash' => null,
-			'ajaxget' => null,
 		],
 
 		'input' => [
@@ -103,7 +99,6 @@ class ElementsDef extends BaseObject
 			'pattern' => null,
 			'range' => null,
 			'hint' => null,
-			'ajaxget' => null,
 			'hidden' => null,
 		],
 	];
@@ -125,9 +120,12 @@ class ElementsDef extends BaseObject
 
 			case 'input':	
 			case 'text':
-			case 'listinput':
 					$elem = self::$elem['input'];
 				break;
+
+			case 'listinput':
+					$elem = self::$elem['input'] + self::$elem['selector'];
+			break;				
 
 			case 'button':
 			case 'link':
@@ -138,6 +136,10 @@ class ElementsDef extends BaseObject
 						$elem = self::$elem['pager'];
 				break;
 
+			case 'variable':
+						$elem = ['skip' => 1];
+				break;
+
 			default:
 						$elem = [];
 				break;
@@ -146,7 +148,7 @@ class ElementsDef extends BaseObject
 		$elem['id'] = $id;
 		$elem['type'] = $type;
 
-		return self::$elem['base'] + $elem;
+		return  $elem + self::$elem['base'];
 	}
 
 }

@@ -23,7 +23,7 @@ use pclib;
  * - Validation of user input
  * - Store %form into database
  * - Can use generic layout with default template
- * - Html5, javascript validation, Ajax and more.
+ * - Html5 support
  *
  * See \ref form-tags for description of implemented tags. \n
  * In addition, you can use common template elements (see \ref tpl-tags)
@@ -36,33 +36,21 @@ class Form extends Tpl
  */
 public $submitted;
 
-/** Occurs after validation. */
-public $onValidate;
-
-/** Occurs before uploading of files. */
-public $onUpload;
-
-/** Occurs before inserting or updating database. */
-public $onSave;
-
-/** Occurs before deleting from database. */
-public $onDelete;
-
 public $fileStorage;
 
 /**
  * Array of error messages filled by validate() function.
- * You can set it on your own too.
  * Error messages can be shown using {errors} or {fieldname.err} tag in template.
  */
-public $invalid = array();
+public $invalid = [];
+
+/** Should submit disabled input fields? */
+public $submitDisabledInputs = true;
 
 /** var FormValidator Form validator. */
 protected $validator;
 
 protected $hidden;
-
-private $ajax_id;
 
 private $extraHidden = array();
 
@@ -73,7 +61,7 @@ protected $className = 'form';
 public $uploadBlackList = array('*.php','*.php?','*.phtml','*.exe','.htaccess');
 
 /** Generate buttons with html button tag or as input type=button. */
-public $useButtonTag = false;
+public $useButtonTag = true;
 
 protected $editables = array('input', 'check', 'radio', 'text', 'select', 'listinput');
 
@@ -93,11 +81,7 @@ protected function _init()
 			$this->header['fileupload'] = 1;
 		}
 
-    if (!empty($elem['ajaxget'])) {
-    	$this->header['ajax'] = true;
-    }
-
-		if (strpos(array_get($elem, 'size'), '/')) {
+		if (strpos(array_get($elem, 'size', ''), '/')) {
 			list($sz,$ml) = explode('/',$elem['size']);
 			$this->elements[$id]['size'] = $sz;
 			$this->elements[$id]['maxlength'] = $ml;
@@ -115,26 +99,21 @@ protected function _init()
 		'submitted' => null, 
 		'pcl_form_submit' => null, 
 		'csrf_token' => null, 
-		'ajax_id' => null
 	];
 
 	if ($request['submitted'] != $this->name) return;
 
 	$this->submitted = $request['pcl_form_submit'] ?: true;
 
-	if ($this->header['csrf']
+	if (!empty($this->header['csrf'])
 		and $request['csrf_token'] != $this->getCsrfToken()
 	) throw new AuthException("CSRF authorization failed.");
-
-
-	if ($request['ajax_id']) {
-		$this->ajax_id = pcl_ident($request['ajax_id']);
-		$this->header['get'] = 1;
-	}
 
 	$this->values = $this->getHttpData();
 
 	$this->saveSession();
+
+	$this->trigger('form.submit');
 }
 
 protected function getValidator()
@@ -144,7 +123,7 @@ protected function getValidator()
 		$valid->skipUndefined = true;
 		$valid->skipUndefinedRule = true;
 		$valid->dateTimeFormat = $this->config['pclib.locale']['date'];
-		$valid->onValidateElement[] = array($this, 'validateElementCallback');
+		$valid->on('validate', [$this, 'validateElementCallback']);
 		$this->validator = $valid;
 	}
 
@@ -157,9 +136,11 @@ protected function getValidator()
  */
 protected function _out($block = null)
 {
+	$this->trigger('form.before-out');
 	print $this->head();
 	parent::_out($block);
 	print $this->foot();
+	$this->trigger('form.after-out');
 }
 
 /**
@@ -177,16 +158,16 @@ function validate()
 	$this->invalid = array();
 	$this->getValidator()->validateArray($this->values, $this->elements);
 	$this->invalid = $this->getValidator()->getErrors();
-	$this->onValidate();
+	$this->trigger('form.validate');
 	$this->saveSession();
 
 	return !(bool)$this->invalid;
 }
 
 //skip non-editable fields
-protected function validateElementCallback($event)
+public function validateElementCallback($event)
 {
-	$elem = $event->data[1];
+	$elem = $event->element;
 	$id = array_get($elem, 'id');
 
 	if (!$id or !$this->isEditable($id)) {
@@ -200,7 +181,7 @@ protected function validateElementCallback($event)
 
 		$errorMsg = call_user_func($elem['onvalidate'], $this, $id, null, $value);
 		if ($errorMsg) {
-			$event->sender->setError($elem['id'], $errorMsg, array($id, $value, $rule, $param));
+			$event->target->setError($elem['id'], $errorMsg, array($id, $value, $rule, $param));
 
 			$event->propagate = false;
 			$event->result = false;
@@ -219,8 +200,8 @@ function loadSession()
 	if (!$this->sessName) return;
 	$s = $this->app->getSession($this->sessName);
 
-	$this->values  = array_get($s, 'values');
-	$this->invalid = array_get($s, 'invalid');
+	$this->values  = array_get($s, 'values') ?: [];
+	$this->invalid = array_get($s, 'invalid') ?: [];
 }
 
 /**
@@ -253,9 +234,13 @@ function isEditable($id, $testAttr = true)
 /**
  * Use default template for displaying database table content.
  */
-function create($tableName)
+function create($tableName, $templatePath = '')
 {
-	$this->createFromTable($tableName, PCLIB_DIR.'assets/default-form.tpl');
+	if (!$templatePath) {
+		$templatePath = $this->defaultTemplatePath.'/default-form.tpl';
+	}
+	
+	$this->createFromTable($tableName, $templatePath);		
 }
 
 /**
@@ -264,7 +249,12 @@ function create($tableName)
  **/
 protected function getHttpData()
 {
-	$data = $this->header['get']? $_GET['data'] : $_POST['data'];
+	if ($this->header['get']) {
+		$data = array_get($_GET, 'data', []);
+	}
+	else {
+		$data = array_get($_POST, 'data', []);
+	}
 
 	$preventMass = $this->config['pclib.security']['form-prevent-mass'];
 	if ($preventMass) {
@@ -279,7 +269,15 @@ protected function getHttpData()
 		}
 
 		$val = array_get($data, $id);
-		if ($elem['type'] == 'check' and !$val and !$elem['noprint']) $data[$id] = array();
+		if ($elem['type'] == 'check' and !$val and !$elem['noprint']) {
+			$multiple = false;
+			foreach(['list', 'query', 'lookup', 'datasource'] as $k) {
+				if (isset($elem[$k])) $multiple = true;
+			}
+
+			$data[$id] = $multiple? array() : '';
+		}
+		if ($elem['type'] == 'radio' and !$val and !$elem['noprint']) $data[$id] = '';
 		elseif ($elem['type'] == 'select' and $elem['multiple'] and !$val and !$elem['noprint']) $data[$id] = array();
 		elseif($elem['type'] == 'input' and is_string($val)) $data[$id] = trim($val);
 	}
@@ -315,6 +313,7 @@ protected function getTag($id, $ignoreHtmlAttr = false)
 	if ($html5) {
 		if ($elem['required']) $tag[] = 'required';
 		if (!empty($elem['pattern'])) $tag['pattern'] = $elem['pattern'];
+		if (!empty($elem['minlength'])) $tag['minlength'] = $elem['minlength'];
 	}
 
 	$tag['placeholder'] = $elem['hint'];
@@ -328,22 +327,6 @@ protected function getTag($id, $ignoreHtmlAttr = false)
 
 	$tag['__attr'] = $elem['attr'];
 
-	if ($ajaxget = $elem['ajaxget']) {
-		$event = str_shift(':', $ajaxget);
-		if (!$event) $event = $this->isEditable($id)? 'onchange' : 'onclick';
-		$url = $this->header['action'];
-		$url .= (strpos($url, '?') ? '&' : '?')."pcl_form_submit=ajax&ajax_id=$id";
-
-		if ($ajaxget == '1' or $ajaxget == '*') {
-			foreach($this->elements as $aid => $tmp) {
-				if ($this->isEditable($aid, false) and $aid != $id)
-					$paramsarray[] = $aid;
-			}
-			$params = implode(',', $paramsarray);
-		}
-		else $params = $ajaxget;
-		$tag[$event] = "pclib.ajaxGet('$this->name','$id','$url','$params')";
-	}
 	return $tag;
 }
 
@@ -389,8 +372,8 @@ function print_Element($id, $sub, $value)
 		return;
 	}
 
-	if ($sub == 'value') {
-		print $value;
+	if ($sub == 'value' or $sub == 'int_value' or $sub == 'string_value') {
+		parent::print_Element($id, $sub, $value);
 		return;
 	}
 
@@ -407,8 +390,6 @@ function print_Element($id, $sub, $value)
 		$this->print_Errors();
 		return;
 	}
-
-	if ($this->header['ajax'] and $id != 'GET') print "<span id=\"x_$id\">";
 
 	switch ($this->elements[$id]['type']) {
 		case 'input':
@@ -437,29 +418,6 @@ function print_Element($id, $sub, $value)
 			parent::print_Element($id,$sub,$value);
 			break;
 	}
-
-	if ($this->header['ajax'] and $id != 'GET') print "</span>";
-}
-
-
-function print_Block($block)
-{
-	if ($this->header['ajax']) {
-		print "<span id=\"x_$block\">";
-		parent::print_Block($block);
-		print "</span>";
-	}
-	else
-		parent::print_Block($block);
-}
-
-function print_Empty($id, $sub = null)
-{
-	if (!$this->header['ajax']) return;
-	if ($sub == 'lb')
-		print "<label for=\"$id\" id=\"xl_$id\"></label>";
-	else
-		print "<span id=\"x_$id\"></span>";
 }
 
 /**
@@ -489,7 +447,7 @@ function print_Class($id, $sub, $value)
 	if ($id != $this->className) return;
 	$printFunc = ($this->header['default_print'] == 'div')? 'divPrintElement' : 'trPrintElement';
 
-	$this->eachPrintable(array($this, $printFunc), $sub);		
+	$this->forElements([$this, $printFunc], $sub);		
 
 	print ($printFunc == 'trPrintElement')? "<tr><td colspan=\"3\">" : '<div class="form-group buttons">';
 	foreach($this->elements as $id => $elem) {
@@ -522,7 +480,7 @@ protected function divPrintElement($elem)
 {
 	$id = $elem['id'];
 	if ($elem['hidden']) return;
-	print "<div class=\"form-group\">";
+	print "<div>";
 	$this->print_Element($id, 'lb', null);
 	$value = $this->getValue($id);
 	if (!$this->fireEventElem('onprint',$id, '', $value)) {
@@ -544,7 +502,7 @@ function print_Label($id)
 	if (!empty($this->invalid[$id])) $class[] = 'err';
 	$attr = '';
 	if ($class) $attr = ' class="'.implode(' ',$class).'"';
-	if ($this->header['ajax']) $attr .= " id=\"xl_$id\"";
+
 	print "<label for=\"$id\"$attr>";
 	print $elem['lb']? $elem['lb'] : $id;
 	print "</label>";
@@ -561,6 +519,11 @@ function print_Input($id, $sub, $value)
 
 	if ($elem['file'] and $sub == 'filename') { print $value; return; }
 
+	if (isset($elem['file-info']) and isset($elem['file-info'][$sub])) {
+		print $elem['file-info'][$sub];
+		return;
+	}
+
 	$html5 = $this->getAttr($elem['id'],'html5');
 	$tag = $this->getTag($id);
 	$tag['maxlength'] = $elem['maxlength']? $elem['maxlength'] : $elem['size'];
@@ -573,6 +536,8 @@ function print_Input($id, $sub, $value)
 	if ($elem['password']) $type = 'password';
 	elseif($elem['file'])  {
 		$type = 'file';
+		if (!empty($elem['accept'])) $tag['accept'] = $elem['accept'];
+
 		if ($elem['multiple']) {
 			$tag['name'] = $tag['id'].'[]';
 			$tag['multiple'] = 1;
@@ -658,23 +623,26 @@ function print_Button($id, $sub, $value)
 		$content = '';
 		if ($elem['img']) $content .= $this->htmlTag('img',array('src'=>$elem['img']));
 		if ($elem['glyph']) $content .= $this->htmlTag('span',array('class'=>$elem['glyph']),'');
-		if ($tag['type'] == 'submit') $tag['name'] = "pcl_form_submit";
+		if ($tag['type'] == 'submit' and !$elem['default']) $tag['name'] = "pcl_form_submit";
 		$tag['value'] = $id;
 		$content .= isset($elem['lb'])? $elem['lb'] : $id;
 	} else {
-		 if ($tag['type'] == 'submit') $tag['name'] = "pcl_form_submit[$id]";
+		 if ($tag['type'] == 'submit' and !$elem['default']) $tag['name'] = "pcl_form_submit[$id]";
 		 $content = null;
 		 $tag['value'] = isset($elem['lb'])? $this->escape($elem['lb']) : $id;
 	}
 
-	if ($elem['confirm']) {
+	if ($url) $onclick = '';
+
+	if ($elem['confirm'] and !$onclick) {
 		$onclick = "if(!confirm('".$elem['confirm']."')) return false;";
 	}
-	elseif ($url and $elem['popup']) {
-		$onclick = $this->getPopup($id, $elem['popup'], $url);
+	
+	if ($url and $elem['popup']) {
+		$onclick .= $this->getPopup($id, $elem['popup'], $url);
 	}
 	elseif ($url) {
-		$onclick = "window.location='$url';";
+		$onclick .= "window.location='$url';";
 	}
 
 	if ($onclick) {
@@ -705,7 +673,7 @@ function print_Checkbox_Radio_Group($id, $sub, $value)
 	$style = array_get($elem['html'], 'style');
 	$class = trim(($is_radio?'radio':'checkbox').'-group '.$class);
 	if ($c = $elem['columns'])
-		$style = "-moz-columns:$c;-webkit-columns:$c;columns:$c;".$style;
+		$style = "columns:$c;".$style;
 
 	print '<div id="'.$id.'-group" class="'.$class.'"'.($style? ' style="'.$style.'"':'').'>';
 	$i = 0;
@@ -730,7 +698,7 @@ function print_Checkbox($id, $sub, $value, $i = null)
 	$tag['type'] = 'checkbox';
 	$tag['checked'] = in_array($cbid, $value)? 'checked' : null;
 	$tag['value'] = $cbid;
-	$tag['id'] = $id.(isset($i)? '_'.$i : '');
+	$tag['id'] = $tag['id'].(isset($i)? '_'.$i : '');
 	if ($sub) $tag['name'] .= "[$i]";
 
 	$html = $this->htmlTag('input', $tag);
@@ -738,7 +706,7 @@ function print_Checkbox($id, $sub, $value, $i = null)
 		$label = $elem['items'][$sub];
 		$html = "<label>$html$label</label>";
 	}
-	if ($tag['checked']) $html .= $this->ieFix($id,$tag['name'], $cbid);
+	if ($tag['checked']) $html .= $this->ieFix($id, $tag['name'], $cbid);
 	print $html;
 }
 
@@ -754,14 +722,14 @@ function print_Radio($id, $sub, $value, $i = null)
 	$tag['type'] = 'radio';
 	$tag['checked'] = ($cbid == $value)? 'checked' : null;
 	$tag['value'] = $cbid;
-	$tag['id'] = $id.(isset($i)? '_'.$i : '');
+	$tag['id'] = $tag['id'].(isset($i)? '_'.$i : '');
 
 	$html = $this->htmlTag('input', $tag);
 	if ($sub) {
 		$label = $elem['items'][$sub];
 		$html = "<label>$html$label</label>";
 	}
-	if ($tag['checked']) $html .= $this->ieFix($id,$tag['name'], $cbid);
+	if ($tag['checked']) $html .= $this->ieFix($id, $tag['name'], $cbid);
 	print $html;
 }
 
@@ -804,12 +772,14 @@ function print_Select($id, $sub, $value)
 	$emptylb = $elem['emptylb'] ?: ' - Choose - ';
 
 	$options = array();
-	$html = $elem['noemptylb']? '':'<option value="">'.$this->t($emptylb).'</option>';
+	$html = $elem['noemptylb']? '':'<option value="">'.$this->app->text($emptylb).'</option>';
 
 	if ($elem['multiple'] and $value and !is_array($value))
 	{
 		$value = explode(',', $value);
 	}
+
+	$disabled = isset($elem['disabled']) ? $elem['disabled'] : [];
 
 	$group = '_nogroup_';
 	foreach ($items as $i => $item) {
@@ -826,7 +796,14 @@ function print_Select($id, $sub, $value)
 		$i = $this->escape($i);
 		$label = $this->escape($label);
 
-		$options[$group] = array_get($options, $group)."<option value=\"$i\"$ch>$label</option>";
+		$dis = in_array($i, $disabled)? ' disabled' : '';
+		if ($dis and $ch) {
+			$dis = '';
+			$this->elements[$id]['noedit'] = 1;
+			$tag = $this->getTag($id);
+		}
+
+		$options[$group] = array_get($options, $group)."<option value=\"$i\"$ch$dis>$label</option>";
 	}
 	if (isset($options['_nogroup_'])) $html .= $options['_nogroup_'];
 	else {
@@ -903,19 +880,19 @@ private function getTableName($tab)
 protected function uploadFs($tableName, $id)
 {
 	$fs = $this->fileStorage;
-	$files = array();
+	$files = [];
 
 	foreach ($fs->postedFiles() as $file) {
 		$elem = $this->elements[$file['INPUT_ID']];
-		if (!$elem or $elem['nosave']) continue;
+		if (!$elem or !empty($elem['nosave'])) continue;
 
-		$entity = $elem['entity'] ?: $tableName;
-
-		$file['PREFIX'] = $elem['prefix'] ?: strtolower($entity).'_';
+		$entity = array_get($this->header, 'entity', $tableName);
 		$files[] = $file;
 	}
 
-	$fs->save(array($id, $entity), $files);
+	if (!$files) return;
+
+	$fs->setFiles([$entity, $id], $files);
 
 	$errors = $fs->getUploadErrors();
 	if ($errors) {
@@ -923,7 +900,7 @@ protected function uploadFs($tableName, $id)
 	}
 }
 
-protected function uploadBasic($old = array())
+protected function uploadBasic($old = [])
 {
 	foreach ($_FILES as $id => $aFile) {
 		$elem = $this->elements[$id];
@@ -949,16 +926,41 @@ protected function uploadBasic($old = array())
  * Upload form files.
  * @param array $old List of previous versions of files - will be deleted
  */
-function upload($tableName, $id, $old = array())
+function upload($tableName, $id, $old = [])
 {
-	$event = $this->onUpload($_FILES, $old);
-	if ($event and !$event->propagate) return;
-
 	if ($this->fileStorage) {
 		$this->uploadFs($tableName, $id);
 	}
 	else {
 		$this->uploadBasic($old);
+	}
+}
+
+/**
+ * Return content of uploaded file.
+ * @param string $id Input id
+ * @return string $file|false
+ */
+function getFile($id)
+{
+	$aFile = $_FILES[$id];
+	if (!$aFile['size'] or $aFile['error']) return false;
+	if ($this->fileInBlackList($this->values[$id])) return false;
+	return file_get_contents($aFile['tmp_name']);
+}
+
+function loadFiles($entityName, $id)
+{
+	$fs = $this->fileStorage;
+	if (!$fs) return false;
+	$files = $fs->getFiles([$entityName, $id]);
+
+	foreach ($files as $file) {
+		$elemId = $file['FILE_ID'];
+		$this->values[$elemId] = $file['ORIGNAME'];
+		if ($this->elements[$elemId]) {
+			$this->elements[$elemId]['file-info'] = $file;
+		}
 	}
 }
 
@@ -972,7 +974,7 @@ function upload($tableName, $id, $old = array())
 function insert($tab)
 {
 	$tab = $this->getTableName($tab);
-	$event = $this->onSave('insert', $tab);
+	$event = $this->trigger('form.update', ['action' => 'insert', 'table' => $tab]);
 	if ($event and !$event->propagate) return;
 
 	$this->service('db');
@@ -991,7 +993,7 @@ function insert($tab)
 function update($tab, $cond)
 {
 	$tab = $this->getTableName($tab);
-	$event = $this->onSave('update', $tab, $cond);
+	$event = $this->trigger('form.update', ['action' => 'update', 'table' => $tab, 'where' => $cond]);
 	if ($event and !$event->propagate) return;
 
 	$this->service('db');
@@ -1020,7 +1022,7 @@ function update($tab, $cond)
 function delete($tab, $cond)
 {
 	$tab = $this->getTableName($tab);
-	$event = $this->onDelete('delete', $tab, $cond);
+	$event = $this->trigger('form.update', ['action' => 'delete', 'table' => $tab, 'where' => $cond]);
 	if ($event and !$event->propagate) return;
 
 	$this->service('db');
@@ -1032,14 +1034,15 @@ function delete($tab, $cond)
 	$this->db->delete($tab, $cond, $params);
 
 	if ($this->header['fileupload']) {
-		$this->deleteFiles($tab, $data);
+		$entity = array_get($this->header, 'entity', $tab);
+		$this->deleteFiles($entity, $data);
 	}
 }
 
-protected function deleteFiles($tableName, $data)
+protected function deleteFiles($entityName, $data)
 {
 	if ($this->fileStorage) {
-		$this->fileStorage->deleteEntity(array($data['ID'] ?: $data['id'], $tableName));
+		$this->fileStorage->deleteFiles([$entityName, $data['ID'] ?: $data['id'] ]);
 	}
 	else {
 		foreach ($this->elements as $id=>$elem) {
@@ -1051,7 +1054,7 @@ protected function deleteFiles($tableName, $data)
 	}
 }
 
-function getVisibleIds()
+protected function getVisibleIds()
 {
 	$list = [];
 
@@ -1096,7 +1099,7 @@ function getVisibleElements()
 				$value = implode(', ', $labels);
 			}
 			else {
-				$value = $this->t($value[0]? 'yes' : 'no');
+				$value = $this->app->text($value[0]? 'yes' : 'no');
 			}
 		}
 
@@ -1143,45 +1146,6 @@ function mailTo($to, $subj, $intro='', $hdr='')
 }
 
 /**
- * Synchronize %form elements on the client with server, without reloading page.
- * @param string $elemList Colon separated list of elements to synchronize
- * @return string json-data
- */
-function ajaxSync($elemList = null)
-{
-	if (!isset($elemList)) {
-		$elemList = $this->elements[$this->ajax_id]['ajaxget'];
-		if (strpos($elemList, ':')) str_shift(':', $elemList);
-	}
-	if ($elemList != '1')
-		$elemarray = explode(',', $elemList);
-	else
-		$elemarray = array_keys($this->values);
-
-	$result = array();
-	$this->header['ajax'] = false;
-	foreach((array)$elemarray as $id) {
-		$h_id = $this->elements[$id]? "x_$id" : $id;
-		if ($this->getAttr($id, 'noprint')) {
-			$result[$h_id] = '';
-			$result['xl_'.$id] = '';
-			continue;
-		}
-		ob_start();
-		if ( $this->elements[$id]['type'] == 'block')
-			$this->print_Block($id);
-		else
-			$this->print_Element($id, null, $this->getValue($id));
-		$result[$h_id] = ob_get_contents();
-		/*if ($this->config['pclib.encoding'])
-			$result[$h_id] = utf8_string($result[$h_id]);*/
-		ob_end_clean();
-	}
-
-	return json_encode($result);
-}
-
-/**
  * Set maxlength and size of the %form fields, according underlying database table.
  * @param $tab Table name
  */
@@ -1218,13 +1182,14 @@ function addHidden($name, $value)
 //submit disabled elements too (add hidden field for disabled element)
 protected function ieFix($id, $name, $value)
 {
+	if (!$this->submitDisabledInputs) return '';
 	if (!$this->getAttr($id, 'noedit') or $this->elements[$id]['hidden']) return '';
 
 	$tag = array(
 		'type' => 'hidden',
 		'id' => $id.'_hid',
 		'name' => $name,
-		'value' => $value,
+		'value' => $this->escape($value),
 	);
 	return $this->htmlTag('input', $tag);
 }
@@ -1239,18 +1204,18 @@ protected function fileName($id)
 	$elem = $this->elements[$id];
 
 	$fileName = $this->values[$id];
-	$baseName = extractPath($fileName, '%f');
-	$ext = extractPath($fileName, '.%e');
+	$baseName = Str::extractPath($fileName, '%f');
+	$ext = Str::extractPath($fileName, '.%e');
 
-	if (utf8_strlen($ext) > 6) {
+	if (Str::length($ext) > 6) {
 		$baseName .= $ext; 
 		$ext = '';
 	}
 
-	$baseName = substr(mkident($baseName, '-'), 0, 80);
+	$baseName = substr(Str::id($baseName, '\w\.-'), 0, 80);
 
 	while (true) {
-		$fileName = $baseName.'-'.randomstr(8).$ext;
+		$fileName = $baseName.'-'.Str::random(8).$ext;
 		if (!file_exists(realpath($elem['path']).'/'.$fileName)) break;
 	}
 
@@ -1266,7 +1231,7 @@ protected function toSqlDate($dtstr, $fmtstr = '')
 
 	$dt = preg_split("/[^0-9]+/", $dtstr);
 	if (!$fmtstr or $fmtstr == '1') $fmtstr = $this->config['pclib.locale']['datetime'];
-	preg_match_all("/%(.)/", $fmtstr, $fmt, PREG_PATTERN_ORDER);
+	preg_match_all("/(.)/", $fmtstr, $fmt, PREG_PATTERN_ORDER);
 	$fmt = $fmt[1];
 
 	$oDT = new \stdClass;
@@ -1305,7 +1270,7 @@ protected function toBitField(array $bitArray)
 /** escape value for using in form input */
 protected function escape($s)
 {
-	return utf8_htmlspecialchars($s);
+	return Str::htmlspecialchars($s);
 }
 
 /** return <form> header */
@@ -1324,7 +1289,7 @@ protected function head()
 
 	if ($ha) $tag += $ha;
 
-	if (!$this->useXhtml) $tag['name'] = $this->name;
+	$tag['name'] = $this->name;
 
 	$action = $this->getUrl($this->header);
 
@@ -1351,12 +1316,14 @@ protected function head()
 
 	if (!empty($this->header['fileupload'])) $tag['enctype'] = 'multipart/form-data';
 
-	$html = $this->htmlTag('form', $tag, null, true)."\n";
+	$html = $this->htmlTag('form', $tag)."\n";
 
 	$hidden = (array)$hidden + $this->extraHidden; 
 	foreach ($hidden as $k => $v) {
-		$html .= "<input type=\"hidden\" name=\"$k\" value=\"$v\"".($this->useXhtml? ' />' : '>')."\n";
+		$html .= "<input type=\"hidden\" name=\"$k\" value=\"$v\">\n";
 	}
+
+	if (!empty($this->header['header_text'])) $html .= $this->header['header_text'];
 
 	return $html;
 }
@@ -1373,7 +1340,8 @@ protected function foot()
 		$html = ob_get_contents();
 		ob_end_clean();
 	}
-	if (!$this->header['noformtag']) $html .= '</form>';
+	if (!empty($this->header['footer_text'])) $html .= $this->header['footer_text'];
+	if (empty($this->header['noformtag'])) $html .= '</form>';
 
 	return $html;
 }
@@ -1383,7 +1351,7 @@ private function getCsrfToken()
 	if (!session_id()) return '';
 	$token = $this->app->getSession('pclib.csrf_token');
 	if (!$token) {
-		$token = randomstr(10);
+		$token = Str::random(10);
 		$this->app->setSession('pclib.csrf_token', $token);
 	}
 	return $token;
@@ -1434,7 +1402,10 @@ private function getValidationString()
 		switch($rule) {
 			case 'number': if($options != 'strict') continue 2; break;
 			case 'date': $options = preg_replace("/[^dmyhms]/i","", $options); break;
-			case 'file': $options = strtr($options, array('.' => '\.', '*' => '.*', '?' => '.')); break;
+			case 'file': 
+				$options = strtr($options, array('.' => '\.', '*' => '.*', '?' => '.')); 
+				if (!empty($elem['size_mb'])) $options = $elem['size_mb'] .';'.$options;
+			break;
 		}
 
 		$lb = strip_tags(strtr($elem['lb'],'"|',"'/")) ?: $id;

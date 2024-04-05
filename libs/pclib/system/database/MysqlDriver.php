@@ -10,6 +10,7 @@
 
 namespace pclib\system\database;
 use pclib\DatabaseException;
+use pclib\Str;
 
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -29,7 +30,8 @@ public $extension = 'mysql';
 function connect($ds)
 {
 	$ok = false;
-	$res = @mysql_connect($ds['host'], $ds['user'], $ds['passw'], $this->forceReconnect);
+	$port = $ds['port']? ':'.$ds['port'] : '';
+	$res = @mysql_connect($ds['host'].$port, $ds['user'], $ds['passw'], $this->forceReconnect);
 	if ($res) $ok = mysql_select_db($ds['dbname'], $res);
 	if (!$ok) {
 		$this->error = $this->lastError();
@@ -205,14 +207,19 @@ private function u_type($type, $size)
 	return $type;
 }
 
+function quoteIdent($str)
+{
+	return "`".Str::id($str)."`";
+}
+
 function quote($str)
 {
-	return "`".$str."`";
+	return "'".mysql_real_escape_string ($str, $this->connection)."'";
 }
 
 function escape($str, $type = 'string')
 {
-	if ($type == 'ident') return $this->quote(pcl_ident($str));
+	if ($type == 'ident') return $this->quoteIdent($str);
 	if (!$str or is_numeric($str)) return $str;
 
 	if ($this->connection)

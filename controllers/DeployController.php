@@ -3,6 +3,8 @@ include 'libs/FileSync.php';
 include 'libs/TextLogger.php';
 include 'libs/class.Diff.php';
 
+use pclib\Str;
+
 class DeployController extends PCController {
 
 /*var TextLogger */
@@ -31,8 +33,13 @@ function initAction($task)
   $task = sanitize($task, 'file-id');
 
   $config = $this->getConfig($task);
+
+  if (!is_dir($config['local'])) {
+    $this->app->error($config['local'] .' is not valid directory.');
+  }
+
   $fs = new FileSync;
-  $files = $fs->getList($config['local'], $config);  
+  $files = $fs->getList($config['local'], $config);
   $hashes = $this->createHashArray($files, true);
 
   if ($_POST['save']) {
@@ -306,10 +313,10 @@ protected function getTasks()
   $tasks = array();
   foreach(glob('./config/*') as $fileName) {
     if (is_dir($fileName)) {
-      $tasks[]['DIR'] = extractPath($fileName, "%f");
+      $tasks[]['DIR'] = Str::extractPath($fileName, "%f");
     }
-    elseif(extractPath($fileName, "%e") == 'php') {
-      $tasks[]['TASK'] = extractPath($fileName, "%f");
+    elseif(Str::extractPath($fileName, "%e") == 'php') {
+      $tasks[]['TASK'] = Str::extractPath($fileName, "%f");
     }
   }
 

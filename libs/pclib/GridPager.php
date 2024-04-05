@@ -37,6 +37,8 @@ class GridPager extends system\BaseObject
 	/** Pattern for rendering of the pager item. */
 	public $patternItem = '<span class="%s">%s</span>';
 
+	public $patternItems = '<span class="%s">%s</span>';
+
 	/** var Translator */
 	public $translator;
 
@@ -125,6 +127,7 @@ class GridPager extends system\BaseObject
 				case "previous": return $this->clamp($this->page-1, 1, $this->maxPage);
 				case "pglen": return $this->pageLen;
 				case "total": return $this->length;
+				case "visible": return $this->maxPage > 1? 'visible' : 'hidden';
 				case "all": return 'all';
 				case "active": 
 				case "page": return $this->page;
@@ -149,9 +152,13 @@ class GridPager extends system\BaseObject
 	 * @param string $cssClass
 	 * @return string $html
 	 */
-	function getHtml($id, $cssClass = 'page-item')
+	function getHtml($id, $cssClass = 'page-item', $pattern = null)
 	{
 		$plainValues = array('maxpage','pglen','total','page','active');
+
+		if ($id == 'visible') return $this->getValue($id);
+
+		if (!$pattern) $pattern = $this->patternItem;
 
 		if ($id == 'pages') return $this->getPagesHtml();
 		if (in_array($id, $plainValues)) {
@@ -163,7 +170,7 @@ class GridPager extends system\BaseObject
 			$val = "<a href=\"$url\" class=\"page-link\">$lb</a>";
 		}
 		
-		return sprintf($this->patternItem, $cssClass, $val);
+		return sprintf($pattern, $cssClass, $val);
 	}
 
 	/**
@@ -176,10 +183,10 @@ class GridPager extends system\BaseObject
 
 		foreach ($this->pagerRange($this->page, $this->linkNumber) as $page) {
 			if ($this->page == $page) {
-				$pages[] = $this->getHtml($page, 'page-item active');
+				$pages[] = $this->getHtml($page, 'page-item active', $this->patternItems);
 			}
 			else {
-				$pages[] = $this->getHtml($page);
+				$pages[] = $this->getHtml($page, 'page-item', $this->patternItems);
 			}
 		}
 
@@ -196,10 +203,12 @@ class GridPager extends system\BaseObject
 	 */
 	function html()
 	{
+		//if ($this->maxPage == 0) return '';
+
 		return sprintf($this->pattern, 
-			$this->getHtml('first'),
-			$this->getHtml('last'),
-			$this->getHtml('pages')
+			$this->getHtml('first', 'page-item', $this->patternItems),
+			$this->getHtml('last', 'page-item', $this->patternItems),
+			$this->getHtml('pages', 'page-item', $this->patternItems)
 		);
 	}
 
@@ -211,7 +220,7 @@ class GridPager extends system\BaseObject
 	 */
 	protected function pagerRange($page, $size)
 	{
-		if ($this->maxPage <= 0) return array();
+		if ($this->maxPage <= 0) return array(1);
 
 		$middle = floor($size / 2);
 

@@ -55,9 +55,6 @@ class ValidatorBase extends BaseObject
 	/** var Translator */
 	public $translator;
 
-	/** Occurs before element validation. */
-	public $onValidateElement;
-
 	function __construct()
 	{
 		parent::__construct();
@@ -130,7 +127,7 @@ class ValidatorBase extends BaseObject
 	 */
 	function isBlank($value)
 	{
-		return is_array($value)? (count($value) == 0) : (strlen($value) == 0);
+		return is_array($value)? (count($value) == 0) : (strlen((string)$value) == 0);
 	}
 
 	/** 
@@ -152,7 +149,7 @@ class ValidatorBase extends BaseObject
 
 	/**
 	 * Validate $value using $rule.
-	 * Example: validateRule('1.1.2016', 'date', '%d.%m.%Y')
+	 * Example: validateRule('1.1.2016', 'date', 'd.m.Y')
 	 * @param mixed $value
 	 * @param string $rule
 	 * @param mixed $param Rule parameters
@@ -193,7 +190,7 @@ class ValidatorBase extends BaseObject
 	 */
 	function validateElement($value, array $elem)
 	{
-		$event = $this->onValidateElement($value, $elem);
+		$event = $this->trigger('validate', ['value' => $value, 'element' => $elem]);
 		if ($event) {
 			if (!$event->propagate) return $event->result;
 		}
@@ -210,11 +207,16 @@ class ValidatorBase extends BaseObject
 
 		//blank fields handling: required: invalid, not-required: valid.
 		if ($this->isBlank($value)) {
-			if ($elem['required']) {
+			if (!empty($elem['required'])) {
 				$this->setError($elem['id'], 'required');
 				return false;
 			}
 			return true;
+		}
+
+		if (!empty($elem['file'])) {
+			$file = array_get($_FILES, $elem['id']);
+			$value = isset($file['name'])? $file : [];
 		}
 
 		foreach ((array)$elem as $rule => $param) {

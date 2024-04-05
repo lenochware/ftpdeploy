@@ -27,31 +27,21 @@ use pclib;
  */
 class Db extends system\BaseObject implements IService
 {
-/* Log-level: 1:Errors; 2:Each query @deprecated */
-public $logging = 1;
-
 /** If enabled, no query is executed. */
 public $disabled = false;
-
-/* Message buffer. Set logging=2, then var_dump($db->messages)
- * will write all executed sql (up to 100 queries).
- * @deprecated
- */
-public $messages = array();
 
 /** SQL of last executed query. */
 public $lastQuery;
 
-/** Occurs before sql-query is executed. */
-public $onBeforeQuery;
-
-/** Occurs after sql-query is executed. */
-public $onAfterQuery;
-
 /** Create new connection even if connection with same params exists */
 public $forceReconnect = true;
 
+/** Log queries slower than 1s - 0: do not log anything */
+public $slowQueryLog = 1.0;
+
 public $LOOKUP_TAB = 'LOOKUPS';
+
+public $info = [];
 
 /** var AbstractDriver Database driver */
 public $drv;
@@ -89,6 +79,9 @@ protected function parseDsn($dsn)
 		$pdo = true;
 		$dsn = substr($dsn, 4);
 	}
+	else {
+		$pdo = false;
+	}
 	
 	$dsa = parse_url($dsn);
 	if (!isset($dsa['scheme'])) return [];
@@ -99,12 +92,14 @@ protected function parseDsn($dsn)
 	$dsarray = array(
 	 'driver' => $dsa['scheme'],
 	 'host'   => $dsa['host'],
+	 'port'   => array_get($dsa, 'port'),
 	 'path'   => substr($dsa['path'],1),
 	 'dbname' => $path[0],
 	 'user'   => $dsa['user'],
 	 'passw'  => array_get($dsa, 'pass'),
-	 'codepage' => $path[1]? $path[1] : null
+	 'codepage' => isset($path[1])? $path[1] : null
 	);
+
 	//new way of adding options e.g. ?charset=utf8
 	if (!empty($dsa['query'])) parse_str($dsa['query'], $dsarray['options']);
 
@@ -131,17 +126,20 @@ function connect($dataSource)
 		throw new \InvalidArgumentException('Invalid connection parameters.');
 	}
 
+	$dsarray = [];
+
 	if(is_string($dataSource)) {
 		$dsarray = $this->parseDsn($dataSource);
 	}
 	elseif (is_array($dataSource) and array_key_exists ('driver', $dataSource)) {
 		$dsarray = $dataSource;
 	}
-	else throw new \InvalidArgumentException('Invalid connection parameters.');
+
+	if (!$dsarray) throw new \InvalidArgumentException('Invalid connection parameters.');
 	
 	$this->dataSource = $dataSource;	
 
-	$drvname = pcl_ident($dsarray['driver']);
+	$drvname = Str::id($dsarray['driver']);
 	
 	if (strpos($drvname, 'pdo_') === 0) {
 		$className = '\\pclib\\system\\database\\Pdo'.ucfirst(substr($drvname, 4)).'Driver';
@@ -158,7 +156,10 @@ function connect($dataSource)
 	$this->drv->verboseErrors = in_array('develop', $this->config['pclib.errors']);
 	$this->drv->forceReconnect = $this->forceReconnect;
 	$this->drv->connect($dsarray);
-	if ($dsarray['options']['charset']) $this->drv->codePage($dsarray['options']['charset']);
+	if (isset($dsarray['options']['charset'])) $this->drv->codePage($dsarray['options']['charset']);
+
+	unset($dsarray['passw']);
+	$this->info = $dsarray;
 }
 
 /**
@@ -167,6 +168,7 @@ function connect($dataSource)
 function close()
 {
 	$this->drv->close();
+	$this->info = [];
 }
 
 function __clone()
@@ -217,22 +219,26 @@ function query($_sql, $param = null)
 	}
 	$sql = $param? $this->setParams($_sql, $param) : $_sql;
 	
-	$event = $this->onBeforeQuery($sql);
+	$event = $this->trigger('db.before-query', ['sql' => $sql]);
 	if ($event and !$event->propagate) return;
+
+	$tm = microtime(true);
 
 	if (!$this->disabled) {
 		$res = $this->drv->query($sql);
 	}
-	
-	if ($this->logging > 1 and !$this->drv->error) {
-		$this->messages[] = "(n) Proceed $sql";
-	}
-	if ($this->logging and $this->drv->error)
-		$this->messages[] = "(e) ".$this->drv->error;
-	else
-		$this->lastQuery = $sql;
+		
+	$this->lastQuery = $this->drv->error? $this->drv->error : $sql;
 
-  $this->onAfterQuery($sql, $this->drv->error);
+  $this->trigger('db.after-query', ['sql' => $sql, 'query' => $res]);
+
+  $tmEnd = microtime(true);
+  if ($this->slowQueryLog and $tmEnd - $tm > $this->slowQueryLog) {
+  	if (!strpos($this->lastQuery, 'LOGGER')) { //avoid recursion
+  		$this->app->log('db', 'db/slow-query', $this->lastQuery . sprintf(" (%01.2fs)", $tmEnd - $tm));
+  	}	
+  }
+
 	return $res;
 }
 
@@ -283,7 +289,7 @@ function selectAll($dsstr)
 /**
  * Perform SELECT query, return first column of result as indexed array.
  * @copydoc shortcut-select
- * @return array $column. Ex: select_one('PERSONS:NAME')
+ * @return array $column. Ex: selectOne('PERSONS:NAME')
  * will return array('John', 'Jack', ...)
 **/
 function selectOne($dsstr)
@@ -300,7 +306,7 @@ function selectOne($dsstr)
  * Perform SELECT query, return first and second column
  * as associative array (lookup query).
  * @copydoc shortcut-select
- * @return array $lookup. Ex: select_pair('PERSONS:NAME,MONEY')
+ * @return array $lookup. Ex: selectPair('PERSONS:NAME,MONEY')
  *  will return array('John' => 12000, 'Jack' => 200, ...)
 **/
 function selectPair($dsstr)
@@ -308,33 +314,8 @@ function selectPair($dsstr)
 	$args = func_get_args();
 	$sql = $this->getSelectSql($dsstr, $args);
 	$res = $this->query($sql);
-	$rows = array(); $n = null;
-	while ($row = $this->drv->fetch($res, 'r')) {
-		$id = array_shift($row);
-		if (!$n) $n = count($row);
-		if ($n == 0) $row = $id;
-		elseif ($n == 1) $row = $row[0];
-		$rows[$id] = $row;
-	}
-	return $rows;
-}
-
-//for compatibility
-function select_All()
-{
-	return call_user_func_array(array($this, 'selectAll'), func_get_args());
-}
-
-//for compatibility
-function select_One()
-{
-	return call_user_func_array(array($this, 'selectOne'), func_get_args());
-}
-
-//for compatibility
-function select_Pair()
-{
-	return call_user_func_array(array($this, 'selectPair'), func_get_args());	
+	
+	return $this->fetchPair($res);
 }
 
 /**
@@ -353,7 +334,7 @@ function insert($tab, $data)
 		$sep = '';
 		$kstr = $vstr = '';
 		foreach($data as $k => $v) {
-			$kstr .= $sep.$this->drv->quote($k);
+			$kstr .= $sep.$this->escape($k, 'ident');
 			if (is_null($v)) $vstr .= $sep."NULL";
 			else $vstr .= $sep."'".$this->escape($v)."'";
 			$sep = ',';
@@ -374,6 +355,28 @@ function insertAll($tab, array $data)
 {
 	foreach($data as $record) {
 		$this->insert($tab, $record);
+	}
+}
+
+/**
+ * Update or insert when key does not exists.
+ * @param string $tab Table name
+ * @param array $data assoc-array of 'FIELDNAME' => 'FIELDVALUE' pairs.
+ * @param array $key Found record for update with $key fields
+ * @return int $inserted_id|false
+**/
+function insertUpdate($tab, array $data, array $key = ['ID'])
+{
+	$filter = array_intersect_key($data, array_flip($key));
+
+	$found = $this->select($tab, $filter);
+
+	if ($found) {
+		$this->update($tab, $data, $filter);
+		return false;
+	}
+	else {
+		return $this->insert($tab, $data);
 	}
 }
 
@@ -424,7 +427,7 @@ function replace($tab, $data)
 	if (is_array($data)) {
 		$sep = '';
 		foreach($data as $k => $v) {
-			$kstr .= $sep.$this->drv->quote($k);
+			$kstr .= $sep.$this->escape($k, 'ident');
 			if (is_null($v)) $vstr .= $sep."NULL";
 			else $vstr .= $sep."'".$this->escape($v)."'";
 			$sep = ',';
@@ -457,7 +460,7 @@ function update($tab, $data, $cond)
 		foreach($data as $k => $v) {
 			//if ($k == '' or $v == '') continue;
 			if (is_null($v)) $v = 'NULL'; else $v = "'".$this->escape($v)."'";
-			$fields .= $sep.$this->drv->quote($k)."=$v";
+			$fields .= $sep.$this->escape($k, 'ident')."=$v";
 			$sep = ',';
 		}
 	}
@@ -568,6 +571,24 @@ function fetchAll($res = null, $fmt = 'a')
 	return $rows;
 }
 
+function fetchPair($res = null)
+{
+	$rows = []; 
+	$n = 0;
+	
+	while ($row = $this->drv->fetch($res, 'r')) {
+		if (!$n) $n = count($row);
+		if ($n == 1) $rows[] = $row[0];
+		elseif($n == 2) $rows[$row[0]] = $row[1];
+		else {
+			$id = array_shift($row);
+			$rows[$id] = $row;
+		}
+	}
+
+	return $rows;
+}
+
 /**
  * Begins a transaction.
  */
@@ -619,7 +640,8 @@ function indexes($table)
 function tableName($dsstr)
 {
 	if (!strpos($dsstr, ' ')) {
-		list($table,$tmp) = explode(':', $dsstr);
+		$t = explode(':', $dsstr);
+		$table = $t[0];
 	}
 	else {
 		preg_match("/from\s+(\w+)/i", $dsstr, $found);
@@ -687,17 +709,6 @@ function getLookup($lkpName)
 	
 	$items = $this->selectPair($sql);
 
-/*
-	if ($this->mls) {
-		$langid = $lkpname;
-		$mls_items = $this->mls->getpage('L_'.$langid);
-		foreach((array)$mls_items as $iid => $label) $items[$iid] = $label;
-
-		if ($this->mls->autoupdate)
-			$this->mls->set_page_db($this->mls->defaultlang, 'L_'.$langid, $items);
-	}
-*/
-
 	return $items;
 }
 
@@ -726,31 +737,46 @@ function setParams($sql, $params)
 	
 	$pat = $this->SQL_PARAM_PATTERN;
 	if (strpos($sql, '{')) $has_params = true;
-	if ($this->config['pclib.compatibility']['sql_syntax'] and strpos($sql, '[')) {
-		$has_params = true;
-		$pat = "/\[([#\?\!]?)([a-z0-9_]+)\]/i";
-	}
 	if (!$has_params) return $sql;
 	
 	preg_match_all($pat, $sql, $found);
+
 	if (!$found[0]) return $sql;
 	$from = $to = array();
 	$empty = false;
-	foreach($found[2] as $i => $key) {
+	foreach($found[2] as $i => $key)
+	{
 		$from[] = $found[0][$i];
-		if (strlen(array_get($params, $key)) == 0) {
-			$empty = true;
-			if ($found[1][$i] == '#') $to[] = '__PCL_EMPTY0__';
-			else $to[] = '__PCL_EMPTYS__';
+		$value = array_get($params, $key);
+
+		if (is_array($value)) {
+			if ($value === []) {
+				$empty = true;
+				if ($found[1][$i] == '#') $to[] = '__PCL_EMPTY0__';
+				else $to[] = '__PCL_EMPTYS__';
+			}
+			elseif ($found[1][$i] == '#')
+				$to[] = implode(',', array_map('intval', $params[$key]));
+			elseif($found[1][$i] == '?')
+				$to[] = '';			
+			else
+				$to[] = implode("','", array_map([$this, 'escape'], $params[$key]));
 		}
-		elseif ($found[1][$i] == '#')
-			$to[] = (int)$params[$key];
-		elseif($found[1][$i] == '?')
-			$to[] = '';
-		elseif($found[1][$i] == '!')
-			$to[] = $params[$key];
-		else
-			$to[] = $this->escape($params[$key]);
+		else {
+			if (strlen((string)$value) == 0) {
+				$empty = true;
+				if ($found[1][$i] == '#') $to[] = '__PCL_EMPTY0__';
+				else $to[] = '__PCL_EMPTYS__';
+			}
+			elseif ($found[1][$i] == '#')
+				$to[] = (int)$value;
+			elseif($found[1][$i] == '?')
+				$to[] = '';
+			elseif($found[1][$i] == '!')
+				$to[] = $value;
+			else
+				$to[] = $this->escape($value);
+		}
 	}
 	
 	$sql = str_replace($from, $to, $sql);
@@ -795,8 +821,15 @@ protected function getWhereSql($cond, $args)
 {
 	if (is_numeric($cond)) throw new \InvalidArgumentException;
 	if (is_array($cond)) {
-		foreach($cond as $k => $v){
-			$s .= " AND ".$this->escape($k,'ident')."='".$this->escape($v)."'";
+		$s = '';
+		foreach($cond as $k => $v) {
+			if (is_array($v)) {
+				$v = implode("','", array_map([$this, 'escape'], $v));
+				$s .= " AND ".$this->escape($k,'ident')."in ('$v')";
+			}
+			else {
+				$s .= " AND ".$this->escape($k,'ident')."='".$this->escape($v)."'";
+			}
 		}
 		$where = substr($s, 5);
 	}

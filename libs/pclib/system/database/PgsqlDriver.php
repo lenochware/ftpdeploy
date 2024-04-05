@@ -10,6 +10,7 @@
 
 namespace pclib\system\database;
 use pclib\DatabaseException;
+use pclib\Str;
 
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -218,15 +219,15 @@ private function u_type($type, $size)
 	return $type;
 }
 
-function quote($str)
+function quoteIdent($str)
 {
 	if ($this->noquote) return $str;
-	return '"'.$str.'"';
+	return '"'.Str::id($str).'"';
 }
 
 function escape($str, $type = 'string')
 {
-	if ($type == 'ident') return $this->quote(pcl_ident($str));
+	if ($type == 'ident') return $this->quoteIdent($str);
 	if (!$str or is_numeric($str)) return $str;
 	return pg_escape_string($str);
 }

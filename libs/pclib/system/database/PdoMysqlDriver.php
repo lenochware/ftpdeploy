@@ -10,6 +10,7 @@
 
 namespace pclib\system\database;
 use pclib\DatabaseException;
+use pclib\Str;
 
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -27,7 +28,8 @@ public $extension = 'pdo_mysql';
 
 function connect($ds)
 {
-	return $this->pdoConnect('mysql:dbname='.$ds['dbname'].';host='.$ds['host'], $ds['user'], $ds['passw']);
+	$port = $ds['port']? ';port='.$ds['port'] : '';
+	return $this->pdoConnect('mysql:dbname='.$ds['dbname'].';host='.$ds['host'].$port, $ds['user'], $ds['passw']);
 }
 
 function query($sql)
@@ -137,8 +139,9 @@ private function u_type($type, $size)
 	return $type;
 }
 
-function quote($str) {
-	return "`".$str."`";
+function quoteIdent($str)
+{
+	return "`".Str::id($str)."`";
 }
 
 } //class

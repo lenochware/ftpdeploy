@@ -2,6 +2,7 @@
 
 namespace pclib\extensions;
 use pclib\system\AuthBase;
+use pclib\Str;
 
 /**
  * Execute auth console commands, see execute() method.
@@ -82,11 +83,10 @@ function execute($line)
 	}
 	else $this->masterCmd = null;
 
-	if ($pos = utf8_strpos($line, ';')) $line = utf8_substr($line, 0, $pos);
+	if ($pos = Str::strpos($line, ';')) $line = Str::substr($line, 0, $pos);
 
 	$keywords = "user|role|right|active|passw|dpassw";
-	$patt = '/([+-\? ])\s*('.$keywords.')\s(\s*([\w\/\*]+))?(\s*\"([^\"]+)\")?/i';
-	//utf8_preg_match_all()?
+	$patt = '/([+-\? ])\s*('.$keywords.')\s(\s*([\w\/\*\.-]+))?(\s*\"([^\"]+)\")?/i';
 	$terms_n = preg_match_all($patt, ' '.$line.' ', $terms, PREG_SET_ORDER);
 	if (!$terms_n) {
 			$this->setError('Syntax error in `%s`', $line);
@@ -100,7 +100,10 @@ function execute($line)
 	if (!$this->masterCmd) {
 		$master = array_shift($terms);
 		$ok = $this->executeCmd($master);
-		if (!$ok) return false;
+		if (!$ok) {
+			$this->setError($this->mng->errors[0]);
+			return false;
+		}
 		$this->masterCmd = $master;
 	}
 	if ($terms)
@@ -115,6 +118,33 @@ private function addHtmlClass($value, $clsid)
 {
 	return "<span class=\"$clsid\">$value</span>";
 }
+
+/** Build filter for querying roles. */
+protected function roleFilter(array $terms)
+{
+	if (!$terms) return array();
+	$filter = array();
+	foreach ($terms as $cmd) {
+		$op    = trim($cmd[1]);
+		$ty   = $cmd[2];
+		$name  = $cmd[4];
+		switch ($ty) {
+			case 'right':
+				$rid = $this->mng->sname($name, 'right');
+
+				if (!$rid) {
+					$this->setError('Right `%s` does not exist.', $name);
+					break;
+				}
+
+				$filter['RIGHT'] = $rid;
+				break;
+		}
+	}	
+
+	return $filter;
+}
+
 
 /** Build filter for querying users. Return filter array. Used in query(). */
 protected function userFilter(array $terms)
@@ -134,8 +164,13 @@ protected function userFilter(array $terms)
 			break;
 			case 'right':
 				$rid = $this->mng->sname($name, 'right');
-				if (!$rid) break;
-				if ($filter['RIGHT'] or $op != '+') {
+
+				if (!$rid) {
+					$this->setError('Right `%s` does not exist.', $name);
+					break;
+				}
+
+				if (!empty($filter['RIGHT']) or $op != '+') {
 					$this->setError('Runtime error in `%s`', $cmd[0]);
 					break;
 				}
@@ -153,8 +188,13 @@ protected function userFilter(array $terms)
 			break;
 			case 'role':
 				$rid = $this->mng->sname($name, 'role');
-				if (!$rid) break;
-				if ($filter['ROLE'] or $op != '+') {
+
+				if (!$rid) {
+					$this->setError('Role `%s` does not exist.', $name);
+					break;
+				}
+
+				if (!empty($filter['ROLE']) or $op != '+') {
 					$this->setError('Runtime error in `%s`', $cmd[0]);
 					break;
 				}
@@ -177,7 +217,7 @@ protected function query(array $terms)
 	$op    = trim($master[1]);
 	$ty   = $master[2];
 	$name  = strtr($master[4],'*','%');
-	$annot = $master[6];
+	$annot = array_get($master, 6, '');
 	
 	$pgsql = (get_class($this->db->drv) == 'pgsql')? $this->db->drv : null;
 
@@ -235,15 +275,25 @@ protected function query(array $terms)
 			else $this->messages[] = 'user rights: -';
 		}
 		else {
-			$this->setError('User %s not exists.', $name);
+			$this->setError('User `%s` does not exist.', $name);
 			return false;
 		}
 	break;
 	case 'role':
 		$role_n = $this->db->count($this->mng->ROLES_TAB, "SNAME like '{0}'", $name);
 		if ($role_n > 1) {
+			$filter = $this->roleFilter($terms);
+			if ($this->errors) break;
+			$filter['SNAME'] = $name;
+
 			$roles = $this->db->selectOne(
-				$this->mng->ROLES_TAB.':SNAME',"SNAME like '{0}'", $name);
+				"select distinct R.SNAME from {$this->mng->ROLES_TAB} R
+				~ left join {$this->mng->REGISTER_TAB} REG on REG.ROLE_ID=R.ID
+				where R.SNAME like '{SNAME}'
+				~ AND REG.RIGHT_ID='{RIGHT}' AND REG.RVAL<>'0'",
+				$filter
+			);
+
 			$this->messages[] = wordwrap(implode(' ', $roles), 60, '<br>');
 			$this->messages[] = "\nFound ".count($roles)." roles.";
 		}
@@ -270,7 +320,7 @@ protected function query(array $terms)
 			$this->messages[] = "Assigned to $role_n users.";
 		}
 		else {
-			$this->setError('Role %s not exists.', $name);
+			$this->setError('Role `%s` does not exist.', $name);
 			return false;
 		}
 	break;
@@ -301,7 +351,7 @@ protected function query(array $terms)
 
 		}
 		else {
-			$this->setError('Right %s not exists.', $name);
+			$this->setError('Right `%s` does not exist.', $name);
 			return false;
 		}
 
@@ -309,7 +359,7 @@ protected function query(array $terms)
 	case 'dpassw':
 	$uid = $this->mng->sname($name, 'user');
 	if (!$uid) return false;
-	$user = $this->db->select($this->mng->USERS_TAB, pri($uid));
+	$user = $this->db->select($this->mng->USERS_TAB, ['ID' => $uid]);
 	$msg = "dpassw: ".$this->addHtmlClass($user['DPASSW'],'console-value')." enabled: ";
 	$msg .= $user['PASSW']? 'no.':'yes.';
 	$this->message($msg);
@@ -326,7 +376,7 @@ protected function executeCmd($cmd)
 	$op    = trim($cmd[1]);
 	$opt   = $cmd[1].$cmd[2];
 	$name  = $cmd[4];
-	$annot = $cmd[6];
+	$annot = array_get($cmd, 6, '');
 
 	if (!$op) return true;
 
@@ -362,7 +412,11 @@ protected function executeCmd($cmd)
 				}
 
 				$ok = $this->mng->mkUser($name, $fullname, null, $annot);
-				if ($ok) $this->message("User `%s` added.", $name);
+				if ($ok) {
+					$password = $this->mng->genPassw();
+					$this->mng->setPassw($name, $password);
+					$this->message("User `%s` added with password: %s", [$name, $password]);
+				}
 				break;
 			case '-user':
 				$ok = $this->mng->rmUser($name);
@@ -451,10 +505,9 @@ protected function executeCmd($cmd)
 				$user = array();
 
 				$uid = $this->mng->sname($m_name, 'user');
-				$user['DPASSW'] = $passw? $passw : $this->mng->genPassw();
-				$ok = $this->mng->setUser('#'.$uid, $user);
-				if ($ok) $this->mng->setPassw($m_name, '');
-				if ($ok) $this->message("Default password enabled: %s", $user['DPASSW']);
+				$password = $passw? $passw : $this->mng->genPassw();
+				$ok = $this->mng->setPassw('#'.$uid, $password);
+				if ($ok) $this->message("Default password set: %s", $password);
 			}
 			else $this->setError('Runtime error in `%s`', $cmd[0]);
 		break;
@@ -476,7 +529,7 @@ protected function executeCmd($cmd)
 /**Set message to $this->messages. */
 protected function message($message, $params)
 {
-	$this->messages[] = vsprintf($this->t($message), $params);
+	$this->messages[] = $this->app->text($message, $params);
 }
 
 }

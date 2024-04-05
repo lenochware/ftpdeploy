@@ -47,10 +47,12 @@ function getPage($lang, $pageName)
 	);
 }
 
-protected function getLabelId($label, $category)
+function getLabelId($label, $category)
 {
 	if (!$label) return -1;
 	if ($label == 'source' and $category == 2) return 0;
+	if ($label == 'default' and $category == 3) return 0;
+
 	$id = $this->db->field($this->LABELS_TAB.':ID',
 		"LABEL='{0}' AND CATEGORY='{1}'", $label, $category
 	);
@@ -63,7 +65,7 @@ protected function getLabelId($label, $category)
 
 protected function removeUnusedLabel($id)
 {
-	$label = $this->db->select($this->LABELS_TAB, pri($id));
+	$label = $this->db->select($this->LABELS_TAB, ['ID' => $id]);
 	switch ($label['CATEGORY']) {
 		case 1: $fld = 'TRANSLATOR'; break;
 		case 2: $fld = 'LANG'; break;
@@ -71,7 +73,7 @@ protected function removeUnusedLabel($id)
 	}
 
 	if (!$this->db->exists($this->TRANSLATOR_TAB, $fld."='{0}'", $id)) {
-		$this->db->delete($this->LABELS_TAB, pri($id));
+		$this->db->delete($this->LABELS_TAB, ['ID' => $id]);
 	}
 }
 
@@ -94,7 +96,7 @@ function saveDefault($pageName, $s)
 		$data = $params;
 		$data['DT'] = date('Y-m-d H:i:s');
 		$text_id = $this->db->insert($this->TRANSLATOR_TAB, $data);
-		$this->db->update($this->TRANSLATOR_TAB, "TEXT_ID='$text_id'", pri($text_id));
+		$this->db->update($this->TRANSLATOR_TAB, "TEXT_ID='$text_id'", ['ID' => $text_id]);
 	}
 }
 
@@ -105,15 +107,35 @@ function saveDefault($pageName, $s)
  */
 function createLanguage($lang)
 {
+	if ($this->hasLanguage($lang)) {
+		throw new \pclib\Exception("Language '$lang' already exists.");
+	}
+
+	$data = array(
+		'TRANSLATOR' => $this->getLabelId($this->translator->name, 1),
+		'LANG' => $this->getLabelId($lang, 2),
+		'PAGE' => 0,
+		'TEXT_ID' => 0,
+		'TSTEXT' => $this->translator->name.'/'.$lang,
+		'DT' => date('Y-m-d H:i:s'),
+	);
+
+	//needed placeholder
+	$this->db->insert($this->TRANSLATOR_TAB, $data);
+
+	return $data['LANG'];
+}
+
+function hasLanguage($lang)
+{
 	$langId = $this->getLabelId($lang, 2);
 	$translatorId = $this->getLabelId($this->translator->name, 1);
+
 	$found = $this->db->select($this->TRANSLATOR_TAB,
 		"TRANSLATOR='{0}' AND LANG='{1}'", $translatorId, $langId
 	);
 
-	if ($found) throw new \pclib\Exception("Language '$lang' already exists.");
-
-	return $langId;
+	return $found;	
 }
 
 /**
@@ -127,7 +149,7 @@ function deleteLanguage($lang)
 	/* Check dependencies for source */
 	if ($langId == 0) {
 		if ($this->db->exists($this->TRANSLATOR_TAB, "TRANSLATOR='{0}' AND LANG<>0", $translatorId)) {
-			 throw new \pclib\Exception("Cannot delete source - remove all other languages first.");
+			 throw new \pclib\Exception("Cannot delete 'source' - remove all other languages first.");
 		}
 	}
 

@@ -15,7 +15,7 @@ $app->addConfig('./config.php');
 //$app->debugMode = $app->config['padmin.debugmode'];
 $app->setLayout(isset($_GET['popup'])? 'tpl/popup.tpl' : 'tpl/website.tpl');
 
-$app->layout->_VERSION = 'v1.3.0';
+$app->layout->_VERSION = 'v1.4.0';
 $app->layout->_MENU = file_get_contents('tpl/menu.tpl');
 
 if (!$app->controller) $app->controller = 'deploy';

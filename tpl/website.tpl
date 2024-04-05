@@ -1,9 +1,9 @@
 <?elements
-head HEAD scripts "css/site.css,css/menu.css,js/jquery.js,libs/pclib/assets/pclib.js,js/global.js"
+head HEAD scripts "css/site.css,css/menu.css,js/jquery.js,libs/pclib/www/pclib.js,js/global.js"
 messages PRECONTENT noescape
 string CONTENT noescape
 string TITLE
-string MENU
+string MENU noescape
 string VERSION
 navig NAVIG
 ?>

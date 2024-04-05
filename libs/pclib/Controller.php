@@ -14,12 +14,6 @@ use pclib;
 class Controller extends system\BaseObject
 {
 
-/**
- * Each action method name must have following postfix.
- * Only action methods are callable by sending request from user browser.
- */
-public $ACTION_POSTFIX = 'Action';
-
 /** var App Link to application */
 protected $app;
 
@@ -29,16 +23,22 @@ public $name;
 /** Name of the called action without postfix. */
 public $action;
 
-/** Occurs when Controller is initialized. */
-public $onInit;
+/** authorize() fallback when user is not logged in. */
+public $authorizeRedirect = 'user/signin';
+
+/** Convert url action some-thing into someThingAction() call. */
+public $allowDashInAction = true;
+
+/**
+ * Each action method name must have following postfix.
+ * Only action methods are callable by sending request from user browser.
+ */
+protected $ACTION_POSTFIX = 'Action';
 
 function __construct(App $app)
 {
 	parent::__construct();
 	$this->app = $app;
-	if ($this->app->config['pclib.compatibility']['legacy_classnames']) {
-		$this->ACTION_POSTFIX = '_Action';
-	}
 }
 
 /**
@@ -47,7 +47,7 @@ function __construct(App $app)
  **/
 function init()
 {
-	$this->onInit();
+	$this->trigger('controller.init');
 }
 
 /*
@@ -75,11 +75,15 @@ function findActionName($action)
 {
 	if (!$action) $action = 'index';
 
+	if ($this->allowDashInAction and strpos($action, '-')) {
+		if (strpos($action, '--')) return false;
+		$action = lcfirst(str_replace('-', '', ucwords(strtolower($action), '-')));
+		if (in_array($action.$this->ACTION_POSTFIX, get_class_methods($this))) return $action;
+		return false;
+	}
+
 	if (method_exists($this, $action.$this->ACTION_POSTFIX)) {
 		return $action;
-	}
-	elseif (method_exists($this, 'default'.$this->ACTION_POSTFIX)) {
-		return 'default';		
 	}
 
 	return false;
@@ -95,18 +99,48 @@ public function run($action)
 	$this->action = $this->findActionName($action->method);
 	$this->init();
 
-	if (!$this->action) {
-		$this->app->httpError(404, 'Page not found: "%s"', null, $action->path);
+	if ($this->action) {
+		$action_method = $this->action.$this->ACTION_POSTFIX;
+		$args = $this->getArgs($action_method, $action->params);
+
+		return call_user_func_array([$this, $action_method], $args);
 	}
-
-	$action_method = $this->action.$this->ACTION_POSTFIX;
-	$args = $this->getArgs($action_method, $action->params);
-
-	if ($this->action == 'default') {
-		$this->action = $action;
+	else {
+		return $this->defaultAction($action);
 	}
+}
 
-	return call_user_func_array(array($this, $action_method), $args);
+public function defaultAction($action)
+{
+	$this->app->httpError(404, 'Page not found: "%s"', null, $action->path);
+}
+
+/**
+ * Call route $rs and return result of the controller's action.
+ * @param string $rs Route path i.e. 'comment/edit/id:1'
+ * @return string $output
+ */
+function action($rs)
+{
+  $action = new pclib\Action($rs);
+  $ct = $this->app->newController($action->controller);
+
+  if (!$ct) throw new Exception('Build of '.$action->controller.' failed.');
+
+  return $ct->run($action);
+}
+
+/**
+ * Create template $path, populated with $data.
+ * @param string $path Path to template
+ * @param array $data Template values
+ * @return Tpl $template
+ */
+public function template($path, $data = [])
+{
+  $templ = new pclib\Tpl($path);
+  $templ->values = $data;
+  return $templ;
 }
 
 /**
@@ -140,6 +174,47 @@ function selection($from = null)
 	$sel = new orm\Selection;
 	if ($from) $sel->from($from);
 	return $sel;
+}
+
+/**
+ * Check if user has permission $perm. If not, redirect to sign-in or throw error.
+ * If $perm is empty, any logged user is allowed.
+ **/
+function authorize($perm = '')
+{
+	$auth = $this->app->getService('auth');
+
+	if (!$auth) {
+		$this->app->error('Permission denied.');
+	}
+
+	if (!$perm and $auth->isLogged()) return;
+
+	if (!$auth->isLogged()) {
+		$this->app->message('Please sign in.');
+		$this->app->setSession('backurl', $this->app->request->getUrl());
+		$this->redirect($this->authorizeRedirect);
+	}
+
+	if (!$auth->hasRight($perm)) {
+		http_response_code(403);
+		$this->app->error('Permission denied.');
+	}
+}
+
+/**
+ * Output json data and exit. Use for actions called by ajax.
+ * @param array $data
+ * @param string $code Http response code
+ **/
+public function outputJson(array $data, $code = '')
+{
+  if ($code) {
+    http_response_code($code);
+  }
+
+  header('Content-Type: application/json; charset=utf-8');
+  die(json_encode($data, JSON_UNESCAPED_UNICODE));
 }
 
 

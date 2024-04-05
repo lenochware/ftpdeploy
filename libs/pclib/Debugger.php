@@ -48,7 +48,7 @@ function __construct()
 //More unique uniqid()
 protected function uniqId()
 {
-	return 'd-'.substr(md5(uniqid(null,true)),0,10);
+	return 'd-'.substr(md5(uniqid('',true)),0,10);
 }
 
 //VARDUMP
@@ -267,7 +267,7 @@ function getSource($fileName, $line, $width = 3)
 private function relpath($path)
 {
  $webroot = str_replace($_SERVER['SCRIPT_NAME'], '', $_SERVER['SCRIPT_FILENAME']);
- return strtr(substr($path, strlen($webroot)), "\\", "/");
+ return strtr(substr((string)$path, strlen($webroot)), "\\", "/");
 }
 
 
@@ -292,6 +292,10 @@ protected function traceArray($e = null)
 
 	$maxlen = array(0,0);
 	foreach(array_reverse($strace) as $call) {
+
+		if (!isset($call['line'])) $call['line'] = null;
+		if (!isset($call['file'])) $call['file'] = null;
+		if (!isset($call['args'])) $call['args'] = [];
 
 		if (isset($call['class'])) {
 			if ($call['class'] == get_class($this)) break;
@@ -376,6 +380,7 @@ function tracePath($levels = 100, $e = null)
 function errorDump($message, $e = null)
 {
 	global $pclib;
+
 	$s = $this->useHtml? '<meta charset="utf-8">':'';
 	$s .= $message.' ';
 	if ($this->useHtml) {

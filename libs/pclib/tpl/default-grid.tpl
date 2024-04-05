@@ -1,5 +1,7 @@
 <?elements
 class templatefactory create "grid" sort
+string elements noescape
+string name
 ?>
 <:?elements
 class grid
@@ -8,11 +10,11 @@ pager pager pglen "20"
 ?:>
 <table class="grid">
   <tr>
-  {block head}<th>{:{name}.lb:}</th>{/block}
+  {:grid.labels:}
   </tr>
 {:block items:}
   <tr>
-  {block columns}<td>{:{name}:}</td>{/block}
+  {:grid.fields:}
   </tr>
 {:/block:}
 </table>

@@ -13,28 +13,35 @@
 # version 2.1 of the License, or (at your option) any later version.
 
 /** pclib default configuration */
-$config = array(
-	'pclib.errors' => array('display', 'develop', /*,'log','template'=>'error.tpl' */),
-	'pclib.locale' => array('date' => '%d. %m. %Y', 'datetime' => '%d.%m.%Y %H:%M%:%S'),
-	'pclib.logger' => array('log' => ['ALL']),
-	'pclib.compatibility' => array(
-		'tpl_syntax' => false,
-		'sql_syntax' => false,
-		'legacy_classnames' => false,
-	),
+$config = [
+	'pclib.errors' => ['display' => true, 'develop' => true, 'log' => false, 'template'=> PCLIB_DIR.'tpl/error.tpl' ],
+	'pclib.locale' => ['date' => 'd. m. Y', 'datetime' => 'd.m.Y H:i:s'],
 
-	'pclib.directories' => array(
-		'logs' => 'temp/log/',
-		'assets' => '{pclib}/assets/',
+	'pclib.directories' => [
+		'assets' => '{pclib}/www/',
 		'localization' => '{webroot}{pclib}/localization/',
-	),
+	],
 
-	'pclib.loader' => array(
-		'controller' => array('dir' => 'controllers', 'namespace' => '', 'postfix' => 'Controller'),
-	),
+	'pclib.security' => ['tpl-escape' => true, 'csrf' => false, 'form-prevent-mass' => false],
+	'pclib.auth' => ['algo' => 'md5', 'secret' => 'write any random string!', 'realm' => ''],
 
-	'pclib.security' => array('tpl-escape' => false, 'csrf' => false, 'form-prevent-mass' => false),
-	'pclib.auth' => array('algo' => 'md5', 'secret' => 'write any random string!', 'realm' => ''),
-);
+	'pclib.app' => [
+		'db' => '',
+		'auth' => false,
+		'logger' => false,
+		'file-storage' => '',
+		'language' => 'cs',
+		'default-route' => '',
+		'layout' => '',
+	],
+];
+
+$develop = [
+	'pclib.errors' => ['develop' => true],
+];
+
+$production = [
+	'pclib.errors' => ['develop' => false, 'log' => true],
+];
 
 ?>

@@ -18,11 +18,12 @@ use pclib;
 /**
  * Provides unified access to HTTP request.
  * Can detect request method, url, user agent, request headers and such.
+ * For any getXxx() method, you can use shortcut ->xxx - e.g. print $app->request->url;
  */
 class Request extends system\BaseObject implements IService
 {
 
-protected $userAgents = array('Chrome', 'Safari', 'Konqueror', 'Opera', 'Firefox', 'Netscape', 'MSIE');
+protected $userAgents = array('Chrome', 'Safari', 'Opera', 'Firefox', 'MSIE');
 
 protected $headers;
 
@@ -35,7 +36,7 @@ function getMethod()
 /** Is current request AJAX request? */
 function isAjax()
 {
-	return ($_SERVER['HTTP_X_REQUESTED_WITH']=='XMLHttpRequest');
+	return (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) and $_SERVER['HTTP_X_REQUESTED_WITH']=='XMLHttpRequest');
 }
 
 /** We have HTTPS? */
@@ -48,6 +49,12 @@ function isSSL()
 function getHost()
 {
 	return $_SERVER['HTTP_HOST'];
+}
+
+/** Return request port. */
+function getPort()
+{
+	return $_SERVER['SERVER_PORT'];
 }
 
 /** Return current url. */
@@ -138,6 +145,14 @@ function getHeaders()
 }
 
 /**
+ * Return request body.
+ */
+function getRawBody()
+{
+  return file_get_contents('php://input');
+}
+
+/**
  * Match current url against pattern.
  * @param string $pattern fnmatch pattern Example: 'http://localhost/*'
  */
@@ -158,6 +173,8 @@ function getUserAgent()
 		if (stristr($signature, $name)) { $agent = $name; break; }
 	}
 
+	if (stristr($signature, ' Edg/')) $agent = 'Edge';
+
 	if ($agent) {
 		$version = substr(stristr($signature, $agent),strlen($agent)+1);
 		list($major,$minor) = sscanf($version, "%d.%d");
@@ -166,9 +183,12 @@ function getUserAgent()
 
 	if (!$agent and stristr($signature, 'Mozilla')) $agent = 'Mozilla like';
 	if (!$agent) $agent = '?';
-	if (stristr($signature, 'Linux')) $os = 'Linux';
-	elseif (stristr($signature, ' Mac')) $os = 'MacOS';
-	elseif (stristr($signature, 'Windows')) $os = 'Windows';
+	
+	if (stristr($signature, 'Windows')) $os = 'Windows';
+	elseif (stristr($signature, 'iPhone')) $os = 'iPhone';
+	elseif (stristr($signature, 'Android')) $os = 'Android';
+	elseif (stristr($signature, 'Mac OS')) $os = 'MacOS';
+	elseif (stristr($signature, 'Linux')) $os = 'Linux';
 	else $os = '?';
 
 	return array($os,$agent,$version);

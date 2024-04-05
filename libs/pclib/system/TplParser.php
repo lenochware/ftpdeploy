@@ -15,6 +15,7 @@
 namespace pclib\system;
 
 use pclib\system\ElementsDef;
+use pclib\Str;
 
 /**
  * Parse pclib template with pclib-elements code.
@@ -156,8 +157,8 @@ class TplParser extends BaseObject
 
 	private function getDocument($def)
 	{
-		$pat[0] = "/{([a-z0-9_.]+)}/i";
-		$pat[1] = "/{(BLOCK|IF|IF NOT)\s+([a-z0-9_]+)}/i";
+		$pat[0] = "/{(@?[a-z0-9_\-.]+)}/i";
+		$pat[1] = "/{(BLOCK|IF|IF NOT)\s+(@?[a-z0-9_\-]+)}/i";
 		$pat[2] = "%{/(BLOCK|IF)}%i";
 
 		$rep[0] = self::TPL_SEPAR . self::TPL_ELEM  . self::TPL_SEPAR . '\\1' . self::TPL_SEPAR;
@@ -182,7 +183,7 @@ class TplParser extends BaseObject
 	{
 		global $pclib;
 		if (!$pclib->app) return $dir;
-		return paramStr($dir, $pclib->app->paths);
+		return Str::format($dir, $pclib->app->paths);
 	}
 
 	protected function mergePartials($templ, $partials, $level = 1)
@@ -228,6 +229,10 @@ class TplParser extends BaseObject
 			if ($strip == self::TPL_ELEM) {
 				$aid = explode('.',$document[$key+1]);
 				$id = $aid[0];
+				if ($id[0] == '@' and empty($elements[$id])) {
+					$elements[$id] = ElementsDef::getElement($id, 'variable');
+				}
+
 				if (isset($elements[$id]) and !$elements[$id]['block'])
 					$elements[$id]['block'] = $block;
 			}
@@ -259,6 +264,10 @@ class TplParser extends BaseObject
 					$block = '__if'.$key;
 					$elements[$block]['ifnot'] = $name;
 				}
+				
+				if ($name[0] == '@' and empty($elements[$name])) {
+					$elements[$name] = ElementsDef::getElement($name, 'variable');
+				}				
 
 				$document[$key+1] = $block;
 				if (isset($elements[$block]['begin'])) {
@@ -272,6 +281,7 @@ class TplParser extends BaseObject
 
 				$elements[$block] += [
 					'noprint' => null, 
+					'onprint' => null, 
 					'if' => null, 
 					'ifnot' => null, 
 					'repeat' => null,

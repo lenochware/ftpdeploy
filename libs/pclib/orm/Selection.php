@@ -50,6 +50,7 @@ function __construct()
 }
 
 /** Iterator.rewind() implementation. */
+#[\ReturnTypeWillChange]
 function rewind()
 {
 	$this->execute();
@@ -57,18 +58,21 @@ function rewind()
 }
 
 /** Iterator.current() implementation. */
+#[\ReturnTypeWillChange]
 function current()
 {
 	return $this->valid()? $this->newModel($this->data) : null;
 }
 
 /** Iterator.key() implementation. */
+#[\ReturnTypeWillChange]
 function key()
 {
 	return $this->position;
 }
 
 /** Iterator.next() implementation. */
+#[\ReturnTypeWillChange]
 function next()
 {
 	$data = $this->db->fetch($this->result);
@@ -82,6 +86,7 @@ function next()
 }
 
 /** Iterator.valid() implementation. */
+#[\ReturnTypeWillChange]
 function valid()
 {
 	return ($this->result !== null);
@@ -116,6 +121,10 @@ protected function newModel($data)
  */
 public function __call($name, $args)
 {
+	if (empty($this->query['from'])) {
+		return parent::__call($name, $args);
+	}
+
 	$modelClass = Model::className($this->query['from']);
 	$methodName = 'select'.ucfirst($name);
 	if (method_exists($modelClass, $methodName)) {
@@ -278,6 +287,18 @@ function select($columns)
 	return $rows;
 }
 
+/** See Db->selectPair(). */
+function selectPair($columns)
+{
+	$this->tryModify();
+	$this->query['select'] = is_array($columns)? $columns : explode(',', $columns);
+	$this->execute();
+	$rows = $this->db->fetchPair($this->result);
+	$this->close();
+	$this->query['select'] = array('*');
+	return $rows;
+}
+
 /**
  * Set source table $s. Fluent interface.
  * @return Selection $this
@@ -415,12 +436,12 @@ function getSql()
 	if (!$select or !$from) return '';
 	
 	$sql = 'SELECT '.implode(',', $select).' FROM '.$from;
-	if ($where)  $sql .= ' WHERE '.implode(' AND ', array_unique($where));
-	if ($whereJoin)  $sql .= ($where? ' AND ':' WHERE ').implode(' AND ', array_unique($whereJoin));
-	if ($group)  $sql .= ' GROUP BY '.$group;
-	if ($having) $sql .= ' HAVING '.implode(' AND ', array_unique($having));
-	if ($order)  $sql .= ' ORDER BY '.implode(',', $order);
-	if ($limit)  $sql .= ' LIMIT '.$limit[0].' OFFSET '.$limit[1];
+	if (isset($where))  $sql .= ' WHERE '.implode(' AND ', array_unique($where));
+	if (isset($whereJoin))  $sql .= ($where? ' AND ':' WHERE ').implode(' AND ', array_unique($whereJoin));
+	if (isset($group))  $sql .= ' GROUP BY '.$group;
+	if (isset($having)) $sql .= ' HAVING '.implode(' AND ', array_unique($having));
+	if (isset($order))  $sql .= ' ORDER BY '.implode(',', $order);
+	if (isset($limit))  $sql .= ' LIMIT '.$limit[0].' OFFSET '.$limit[1];
 	return $sql;
 }
 

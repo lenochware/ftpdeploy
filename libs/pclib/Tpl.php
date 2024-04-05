@@ -31,18 +31,6 @@ use pclib\system\TplParser;
 class Tpl extends system\BaseObject
 {
 
-/** Occurs on template initialization. */
-public $onInit;
-
-/** Occurs after template is loaded and parsed. */
-public $onLoad;
-
-/** Occurs before output. */
-public $onBeforeOut;
-
-/** Occurs after output. */
-public $onAfterOut;
-
 /** Name of the template. */
 public $name;
 
@@ -64,14 +52,8 @@ protected $app;
 /** var Db */
 public $db;
 
-/** var Translator */
-public $translator;
-
 /** var Router */
 public $router;
-
-/** Generate XHTML code. */
-public $useXhtml = false;
 
 /** Link to array of configuration parameters. */
 protected $config = null;
@@ -93,6 +75,14 @@ private $inBlock = array();
 /** Function for escaping html in template values. */
 public $escapeHtmlFunction;
 
+public $defaultTemplatePath =  PCLIB_DIR.'tpl';
+
+/** List of id's to be printed in {grid.fields} tag. */
+protected $fields = [];
+
+/** Additional element type handlers. */
+protected $types = [];
+
 /**
  * Load and parse template file.
  *
@@ -111,17 +101,17 @@ function __construct($path = '', $sessName = '')
 	$this->config = $this->app->config;
 	$this->escapeHtmlFunction = array($this, 'escapeHtml');
 	$this->parser = new TplParser;
-	$this->parser->legacyBlockSyntax = $this->config['pclib.compatibility']['tpl_syntax'];
 
 	$this->sessName = $sessName;
 	$this->loadSession();
+
+	$this->name = $sessName ?: $this->className;
 
 	if ($path) {
 		if (strpos($path, '{') !== false) {
 			$path = $this->app->path($path);
 		}
 		
-		$this->name = extractpath($path, '%f');
 		$this->load($path);
 		$this->init();
 	}
@@ -134,8 +124,12 @@ protected function _init()
 	}
 	else $this->header = [];
 
-	if(isset($this->header['name'])) $this->name = $this->header['name'];
-	if (!$this->name) $this->name = $this->className;	
+	if(isset($this->header['name'])) {
+		$this->name = $this->header['name'];
+	}
+
+	$globals = $this->app->getService('globals');
+	if ($globals) $globals->addGlobals($this, $this->header);
 }
 
 /**
@@ -144,7 +138,7 @@ protected function _init()
 function init()
 {
 	$this->_init();
-	$this->onInit();
+	//$this->onInit();
 }
 
 private function getAccessor($name) {
@@ -182,7 +176,7 @@ function load($path)
 	if (!file_exists($path)) throw new FileNotFoundException("File '$path' not found.");
 	$tpl_string = file_get_contents($path);
 	$this->loadString($tpl_string);
-	$this->onLoad($path);
+	$this->trigger('tpl.after-load', ['path' => $path]);
 }
 
 /**
@@ -212,9 +206,9 @@ protected function _out($block = null)
  */
 function out($block = null)
 {
-	$this->onBeforeOut();
+	$this->trigger('tpl.before-out');
 	$this->_out($block);
-	$this->onAfterOut();
+	$this->trigger('tpl.after-out');
 }
 
 /**
@@ -271,39 +265,27 @@ function disable()
 }
 
 /**
- * Set attributes for template elements.
- * $keystr can be 'element/attribute' or 'block/element/attribute'. If you
- * need set all elements in block, you can use wildcard: 'block/ * /attribute'.
- * Also you can select elements with some attr. value: 'attr=value/attribute'
+ * Set attribute globally for template elements.
  *
- * @param string $keystr Attribute specification (with wildcards)
- * @param string $value Value assigned to attribute.
+ * @param string $id Element/Attribute id
+ * @param string $value Attribute id/Attribute value
+ * @param string $value2 Attribute value
  */
-function set($keystr, $value)
+function setAttr($id, $value, $value2 = null)
 {
-	$key = explode('/',$keystr);
-	if (count($key) == 3) $block = array_shift($key);
-	$id = $key[0];
-	$attr = $key[1];
-	$sattr = false;
-	if (strpos($id,'=')) list($sattr,$svalue) = explode('=', $id);
-
-	if (!$sattr and $id != '*') {
-		$this->elements[$id][$attr] = $value;
-		return;
+	if (isset($value2)) {
+		$this->elements[$id][$value] = $value2;
+	}
+	else {
+		$this->header[$id] = $value;
 	}
 
-	foreach($this->elements as $id => $tmp) {
-		if ($block and !$this->isInBlock($id,$block)) continue;
-		if ($sattr and $this->elements[$id][$sattr] != $svalue) continue;
-		$this->elements[$id][$attr] = $value;
-	}
 }
 
 /* Check if element $id is in $block */
 protected function isInBlock($id, $block)
 {
-	while ($id = $this->elements[$id]['block']) {
+	while ($id = array_get($this->elements[$id], 'block')) {
 		if ($id == $block) return true;
 	}
 	return false;
@@ -318,29 +300,45 @@ protected function isInBlock($id, $block)
 **/
 protected function getAttr($id, $attr)
 {
-	$e = $this->elements[$id];
-	if (isset($e[$attr])) return $e[$attr];
+	if (isset($this->elements[$id])) {
+		$e = $this->elements[$id];
+		if (isset($e[$attr])) return $e[$attr];
 
-	while ($id = $this->elements[$id]['block']) {
-		if (isset($this->elements[$id][$attr]))
-			return $this->elements[$id][$attr];
+		while ($id = $this->elements[$id]['block']) {
+			if (isset($this->elements[$id][$attr]))
+				return $this->elements[$id][$attr];
+		}
 	}
+
 	if (isset($this->header[$attr])) return $this->header[$attr];
 	return null;
 }
 
+/**
+ * Return values of block $block.
+ * @param string $block Id of template block
+ * @return array $values
+**/
 function getBlock($block)
 {
-	$values = array();
+	$values = [];
+
 	foreach($this->elements as $id => $tmp) {
 		if (!$this->isInBlock($id, $block) or $tmp['type'] == 'block') continue;
+	
 		$bid = $id;
-		while ($bid = $this->elements[$bid]['block']) {
-			$value = $this->values[$bid][$id];
+		while ($bid = array_get($this->elements[$bid], 'block')) {
+
+			if (isset($this->values[$bid])) {
+				$value = array_get($this->values[$bid], $id);
+			}
+
 			if (isset($value)) break;
 		}
+
 		$values[$id] = isset($value)? $value : $this->values[$id];
 	}
+
 	return $values;
 }
 
@@ -351,7 +349,7 @@ function getBlock($block)
 **/
 function getValue($id)
 {
-	if (strpos($id, '_tvar_') === 0) {
+	if (strpos($id, '_tvar_') === 0 or $id[0] == '@') {
 		return $this->getVariable($id);
 	}
 
@@ -375,27 +373,34 @@ function getValue($id)
 /** Get template variable _tvar_... */
 protected function getVariable($id)
 {
-	$bid = $this->inBlock[0];
-	$b = $this->elements[$bid];
 
-	$parts = explode('_', $id, 4);
+	if (strpos($id, '_tvar_') === 0) {
+		$id = '@'.substr($id, 6);
+	}
 
-	if (in_array($parts[2], array('get', 'post', 'cookie', 'session'))) {
-		$value = $this->getHttpVariable($parts[2], $parts[3]);
+	if (isset($this->inBlock[0])) {
+		$bid = $this->inBlock[0];
+		$b = $this->elements[$bid];		
+	}
+
+	if (strpos($id, '@GET') === 0) {
+		list($tmp, $key) = explode('_', $id);
+		$value = array_get($_GET, $key);
 	}
 	else {
 		switch ($id) {
-			case '_tvar_baseurl': $value = BASE_URL; break;
-			case '_tvar_rowno': $value = $this->getRowNo(); break;
-			case '_tvar_count': $value = count($this->values[$bid]); break;
-			case '_tvar_top': $value = ($b['rowno'] == 0)? '1':'0'; break;
-			case '_tvar_bottom': $value = ($b['rowno'] == count($this->values[$bid]) - 1)? '1':'0'; break;
+			case '@baseurl': $value = BASE_URL; break;
+			case '@block_rowno': $value = $this->getRowNo(); break;
+			case '@block_count': $value = count(array_get($this->values, $bid, [])); break;
+			case '@block_top': $value = ($b['rowno'] == 0)? '1':'0'; break;
+			case '@block_bottom': $value = ($b['rowno'] == count(array_get($this->values, $bid, [])) - 1)? '1':'0'; break;
 		}	
 	}
 	
-	return $this->escapeHtmlFunction($value);
+	return $value; //$this->escapeHtmlFunction($value);
 }
 
+//unsafe
 protected function getHttpVariable($method, $id)
 {
 	switch ($method) {
@@ -449,13 +454,17 @@ protected function createFromTable($tableName, $templatePath)
 /**
  * Use default template for displaying database table content.
  */
-function create($tableName)
+function create($tableName, $templatePath = '')
 {
-	$this->createFromTable($tableName, PCLIB_DIR.'assets/default-tpl.tpl');
+	if (!$templatePath) {
+		$templatePath = $this->defaultTemplatePath.'/default-tpl.tpl';
+	}
+	
+	$this->createFromTable($tableName, $templatePath);
 }
 
 /** Return computed value of element $id. */
-function compute($id)
+protected function compute($id)
 {
 	$items = array_get($this->elements[$id], 'items');
 	if (!$items) {
@@ -475,6 +484,14 @@ function print_Element($id, $sub, $value)
 {
 	$elem = $this->elements[$id];
 
+	if (
+		($elem['escape'] 
+			or ($this->config['pclib.security']['tpl-escape'] and !$elem["noescape"])
+		) and is_string($value)
+	) {
+		$value = $this->escapeHtmlFunction($value);
+	}
+
   if ($sub == 'lb') {
     print $elem['lb']? $elem['lb'] : $id;
     return;
@@ -483,13 +500,18 @@ function print_Element($id, $sub, $value)
     print $value;
     return;
   }
+  elseif ($sub == 'int_value') {
+    print (int)$value;
+    return;
+  }
+  elseif ($sub == 'string_value') {
+    print json_encode((string)$value);
+    return;
+  }
 
-	if (
-		($elem['escape'] 
-			or ($this->config['pclib.security']['tpl-escape'] and !$elem["noescape"])
-		) and is_string($value)
-	) {
-		$value = $this->escapeHtmlFunction($value);
+	if (isset($this->types[$elem["type"]])) {
+		print call_user_func($this->types[$elem["type"]], $this, $id, $sub, $value);
+		return;
 	}
 
 	switch ($elem["type"]) {
@@ -552,11 +574,9 @@ function print_String($id, $sub, $s)
 
 	if (isset($elem['size'])) {
 		if (!isset($elem['endian'])) $elem['endian'] = '...';
-		if(utf8_strlen($s) > $elem['size'] + 2/*add length of endian*/) {
-			if ($elem['tooltip']) {
-				$title = utf8_htmlspecialchars($s);
-			}
-			$s = utf8_substr($s, 0, $elem['size']) . $elem['endian'];
+		if(Str::length($s) > $elem['size'] + 2/*add length of endian*/) {
+			if ($elem['tooltip']) $title = $s;
+			$s = Str::substr($s, 0, $elem['size']) . $elem['endian'];
 		}
 	}
 
@@ -583,7 +603,8 @@ function print_Bind($id, $sub, $value)
 
 	if ($elem['bitfield']) {
 		$i = 0;
-		$checked = array();
+		$value = (int)$value;
+		$checked = [];
 		while (true) {
 			$bit = pow(2,$i++);
 			if ($value & $bit) $checked[] = $items[$i];
@@ -629,7 +650,10 @@ function print_Link($id, $sub, $value)
 	}
 
 	if ($elem['img']) {
-		$lb = "<img src=\"{$elem['img']}\" class=\"link\" alt=\"{$elem['lb']}\" title=\"{$elem['lb']}\"".($this->useXhtml? ' />' : '>');
+		$lb = $this->htmlTag('img', ['src' => $elem['img'], 'title' => $elem['lb'], 'class' => 'link']);
+	}
+	elseif ($elem['glyph']) {
+		$lb = $this->htmlTag('span', ['class' => $elem['glyph'], 'title' => $elem['lb']], '');
 	}
 	else {
 		$lb = $elem['lb'];
@@ -666,27 +690,33 @@ function print_Link($id, $sub, $value)
  */
 function print_Env($id, $sub, $value)
 {
-	if (!$sub) print $_SERVER['QUERY_STRING'];
-	else print $_GET[$sub];
+	/* if (!$sub) print $_SERVER['QUERY_STRING'];	else */
+	print $this->escapeHtmlFunction($_GET[$sub]);
 }
 
 /**
  * Print all fields into template.
  * It uses simple table layout.
- * Type {tpl.fields} or {tpl.control} into template.
+ * Type {tpl.fields} into template.
  * @copydoc tag-handler
  */
 function print_Class($id, $sub, $value)
 {
 	if ($id != $this->className) return;
-	$this->eachPrintable(array($this, 'trPrintElement'), $sub);
+	$this->forElements([$this, 'trPrintElement'], $sub);
 }
 
-function eachPrintable($callback, $sub = '')
+protected function forElements($callback, $sub = '')
 {
 	$ignore_list = array('class','block','pager','sort','button');
 
-	foreach($this->elements as $id => $elem) {
+	$fields = $this->fields ?: array_keys($this->elements);
+
+	foreach($fields as $id)
+	{
+		if (!isset($this->elements[$id])) continue;
+		$elem = $this->elements[$id];
+	
 		if (in_array($elem['type'], $ignore_list) or $elem['noprint'] or $elem['skip']) {
 			continue;
 		}
@@ -727,7 +757,7 @@ function print_Action($id, $sub, $value)
 	$action = new Action($rs);
 	$ct = $this->app->newController($action->controller, $action->module);
 	if (!$ct) {
-		printf($this->t('Page not found: "%s"'), $action->controller.' '.$action->module);
+		print $this->app->text('Page not found: "%s"', $action->controller.' '.$action->module);
 	}
 	else print $ct->run($action);
 }
@@ -775,7 +805,7 @@ protected function print_BlockRow($block, $rowno = null)
 
 	$bval = array_get($this->values, $block);
 
-	if (is_scalar($bval)) {
+	if (!empty($bval) and is_scalar($bval)) {
 		print $this->values[$block];
 		return;
 	}
@@ -796,7 +826,9 @@ protected function print_BlockRow($block, $rowno = null)
 
 		if ($strip == TplParser::TPL_ELEM) {
 			 $strip = $this->document[++$i];
-			 @list($id,$sub) = explode('.', $strip);
+			 $exploded = explode('.', $strip);
+			 $id = $exploded[0];
+			 $sub = array_get($exploded, 1);
 
 			 if ($this->elements[$id]['noprint']) { $this->print_Empty($id, $sub); continue; }
 
@@ -822,10 +854,14 @@ protected function print_BlockRow($block, $rowno = null)
  * @param string $url url of page to open
  * @return string $js javascript window code
 **/
-function getPopup($id, $attr, $url)
+protected function getPopup($id, $attr, $url)
 {
 		if ($attr == '1') $attr = '800x600';
-		@list($size,$attr) = explode(' ', $attr);
+
+		$exploded = explode(' ', $attr);
+		$size = $exploded[0];
+		$attr = array_get($exploded, 1);
+
 		switch ($attr) {
 		case 'full': $poppar='toolbar=1,location=1,menubar=1,scrollbars=1,resizable=1';
 		break;
@@ -849,7 +885,7 @@ function getPopup($id, $attr, $url)
 
 protected function replaceParams($s)
 {
-	if (strpos($s,'{')) $s = preg_replace_callback (
+	if (strpos($s,'{') !== false) $s = preg_replace_callback (
 		"/{([a-z0-9_.]+)}/i", array($this, 'callback_getvalue'), $s
 	);
 	return $s;
@@ -869,8 +905,10 @@ protected function getUrl($elem)
 	return false;
 }
 
-// add element definition
-// $line has same format as line in section "elements" in common template
+/** 
+ * Add new element.
+ * @param string $line Element definition in template file syntax - e.g. "string Title noprint"
+ */
 function addTag($line)
 {
 	$elem = $this->parser->parseLine($line);
@@ -883,6 +921,26 @@ function addTag($line)
 	else {
 		$this->elements[$elem['id']] = $elem;
 	}
+}
+
+/** 
+ * Add new type of element handled by callback function $fn.
+ * @param string $name Name of new type
+ * @param callable $fn function($obj, $id, $sub, $value)
+ */
+function addType($name, $fn)
+{
+	$this->types[$name] = $fn;
+}
+
+
+/** 
+ * Show only this $fields in template (using tag {grid.fields} or {form.fields}).
+ * @param array $fields list of field (element) ids
+ */
+function setFields($fields)
+{
+	$this->fields = $fields;
 }
 
 
@@ -900,7 +958,10 @@ private function insertAfter(array $a, array $elem, $after)
   );
 }
 
-function htmlTag($name, $attr = array(), $content = null, $startTagOnly = false)
+/** 
+ * Return html tag $name with attributes $attr: "<$name $attr>$content</$name>".
+ */
+function htmlTag($name, $attr = [], $content = null)
 {
 	$html = '<'.$name;
 	if(isset($attr['__attr'])) {
@@ -909,15 +970,12 @@ function htmlTag($name, $attr = array(), $content = null, $startTagOnly = false)
 	}
 	foreach($attr as $k => $v) {
 		if (is_array($v)) $v = implode(' ', $v);
-		if (is_numeric($k)) $html .= $this->useXhtml? " $v=\"$v\"" : " $v";
-		elseif(strlen($v)) $html .= " $k=\"$v\"";
+		if (is_numeric($k)) $html .= " $v";
+		elseif(strlen((string)$v)) $html .= " $k=\"$v\"";
 	}
 
-	if ($startTagOnly) {
+	if (!isset($content)) {
 		return $html.'>';
-	}
-	elseif (!isset($content)) {
-		return $html.($this->useXhtml? ' />' : '>');
 	}
 	else {
 		return $html .'>'.$content."</$name>";
@@ -926,29 +984,32 @@ function htmlTag($name, $attr = array(), $content = null, $startTagOnly = false)
 
 function escapeHtml($s)
 {
-	return utf8_htmlspecialchars($s);
+	return Str::htmlspecialchars($s);
 }
 
 /**
- * DATABASE DATE => HUMAN DATE (in strftime() format)
- * @see strftime()
+ * DATABASE DATE => HUMAN DATE (in date() format)
+ * @see date()
  */
 protected function formatDate($dtstr, $fmt = '')
 {
 	if (!$fmt or $fmt == '1') $fmt = $this->config['pclib.locale']['date'];
 	if (!$dtstr or substr($dtstr,0,10) == '0000-00-00') return '';
 	list($y,$m,$d,$h,$i,$s) = sscanf($dtstr, "%d-%d-%d %d:%d:%d");
+	
+	$y+=0;$m+=0;$d+=0;$h+=0;$i+=0;$s+=0;	
+
 	if (checkdate ($m, $d, $y)) {
 		if ($y < 1970) { //fix problem with unix epoch
-			$trans = array("%Y" => $y, "%y" => substr($y,-2));
+			$trans = array("Y" => $y, "y" => substr($y,-2));
 			$fmt = strtr($fmt, $trans);
 			$y = "1980";
 		}
-		return strftime($fmt, mktime ($h, $i, $s, $m, $d, $y));
+		return date($fmt, mktime ($h, $i, $s, $m, $d, $y));
 	}
 	elseif (substr($dtstr,0,5) == 'today') {
 		$tm = strtotime($dtstr);
-		return strftime($fmt, $tm);
+		return date($fmt, $tm);
 	}
 	else return $dtstr;
 }
@@ -962,13 +1023,13 @@ protected function formatStr($s, $fmt)
 	$len = strlen($fmt);
 	for($i = 0; $i < $len; $i++) {
 		switch ($fmt[$i]) {
-		case "n": $s = nl2br($s, $this->useXhtml); break;
-		case "h": $s = utf8_htmlspecialchars($s); break;
+		case "n": $s = nl2br($s, false); break;
+		case "h": $s = Str::htmlspecialchars($s); break;
 		case "H": $s = strip_tags($s); break;
-		case "u": $s = utf8_strtoupper($s); break;
-		case "l": $s = utf8_strtolower($s); break;
+		case "u": $s = Str::upper($s); break;
+		case "l": $s = Str::lower($s); break;
 		case "s": $s = addslashes($s); break;
-		case "f": $s = pcl_ident($s); break;
+		case "f": $s = Str::id($s, '\w\.-'); break;
 		}
 	}
 	return $s;
@@ -988,7 +1049,7 @@ protected function toString($value) {
  * @param int $id identificator of element
  * @return array $items
  */
-function getItems($id)
+protected function getItems($id)
 {
 	$elem = $this->elements[$id];
 	if (!empty($elem['items'])) {
@@ -1001,8 +1062,9 @@ function getItems($id)
 	elseif ($elem['lookup']) $items = $this->getLkpLookup($elem['lookup']);
 	elseif ($elem['datasource']) $items = $this->getDataSource($elem['datasource']);
 
-	if ($this->translator) {
-		$items = $this->translator->translateArray($items);
+	$tr = $this->app->getService('translator');
+	if ($tr and empty($elem['notranslate'])) {
+		$items = $tr->translateArray($items);
 	}
 
 	$this->elements[$id]['items'] = $items;
@@ -1062,7 +1124,10 @@ private function callback_getvalue_db($param)
 
 private function callback_getvalue($param)
 {
-	@list($id,$sub) = explode('.', $param[1]);
+	$exploded = explode('.', $param[1]);
+	$id = $exploded[0];
+	$sub = array_get($exploded, 1);
+
 	if ($id == 'GET') {
 		if ($sub) return array_get($_GET, $sub);
 		else return '__GET__';
@@ -1076,14 +1141,11 @@ protected function fireEventElem()
 	$name = $args[0]; $args[0] = $this;
 	$id = $args[1];
 	$func = $this->elements[$id][$name];
-	if (!$func and $this->config['pclib.compatibility']['tpl_syntax']) {
-		$func = $this->elements[$id][substr($name,2)];
-		if ($func) $func = 'callback_'.$func;
-	}
 	if (!$func) return false;
+
 	if (!is_callable($func)) {
 		trigger_error(
-			vsprintf($this->t("Function %s of event %s not found."), array($func, $name)),
+			$this->app->text("Function %s of event %s not found.", $func, $name),
 			E_USER_WARNING
 		);
 		return false;
@@ -1091,11 +1153,6 @@ protected function fireEventElem()
 	$ret = call_user_func_array($func, $args);
 	if ($ret === null) $ret = true; //no return - stop propagation
 	return $ret;
-}
-
-protected function t($s)
-{
-	return $this->service('translator', false)? $this->translator->translate($s) : $s;
 }
 
 } //class Tpl

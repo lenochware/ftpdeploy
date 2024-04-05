@@ -30,14 +30,10 @@ class Router extends system\BaseObject implements IService
 	/** var Action Current %Action */
 	public $action;
 
-	/** Occurs after Action is created from HTTP request and before dispatch. */ 
-	public $onGetAction;
-
-	/** Occurs when url (link) is created from Action. */ 
-	public $onCreateUrl;
+	/** var index Default index page - for example 'index-dev.php' */
+	public $index = '';
 
 	public $redirects;
-
 
 function __construct()
 {
@@ -58,9 +54,9 @@ function getAction()
 	//%form button has been pressed, set route accordingly.
 	if (!empty($_REQUEST['pcl_form_submit'])) {
 		$action->method = $_REQUEST['pcl_form_submit'];
+		$action->setPath($action->controller.'/'.$action->method);
 	}
 
-	$this->onGetAction($action);
 	return $action;
 }
 
@@ -90,6 +86,36 @@ function followRedirects()
 }
 
 /**
+ * Redirect to $route or url.
+ */
+function redirect($route, $code = null)
+{
+	if ($code) http_response_code($code);
+
+	if ($route == '/self') {
+		$this->reload();
+	}
+
+	if (is_array($route)) {
+		$url = $route['url'];
+	}
+	else {
+		$url = $this->createUrl($route);
+	}
+
+	$this->trigger('router.redirect', ['url' => $url]);
+
+	header("Location: $url");
+	exit();
+}
+
+function reload()
+{
+	global $pclib;
+	$this->redirect(['url' => $pclib->app->request->url]);
+}
+
+/**
  * Transform internal action (for example 'products/edit/id:1') to URL.
  * @param string|Action $s
  * @return string $url
@@ -99,8 +125,6 @@ function createUrl($s)
 	$action = is_string($s)? new Action($s) : $s;
 	//TODO: test instanceof Action
 
-	$this->onCreateUrl($action);
-
 	if (!$action->controller) return $this->baseUrl;
 
 	if ($this->friendlyUrl) {
@@ -108,7 +132,7 @@ function createUrl($s)
 		return $this->baseUrl.$action->path.($params? '?'.$this->buildQuery($params) : '');
 	} else {
 		$params = array('r' => $action->path) + $action->params;
-		return $this->baseUrl.'?'.$this->buildQuery($params);
+		return $this->baseUrl.$this->index.'?'.$this->buildQuery($params);
 	}
 }
 
@@ -152,6 +176,11 @@ class Action
 		}
 	}
 
+	function setPath($path)
+	{
+		$this->path = preg_replace("/[^a-z0-9_:,;@ \-\.\/]/i","", $path);
+	}
+
 	/**
 	 * Convert route to string.
 	 * @return string $route
@@ -181,15 +210,19 @@ class Action
 
 		foreach($ra as $section) {
 			if ($section == '__GET__') { $params += $_GET; continue; }
-			@list($name,$value) = explode(':', $section);
+
+			$exploded = explode(':', $section);
+			$name = $exploded[0];
+			$value = array_get($exploded, 1);
+						
 			if (isset($value)) $params[$name] = $value;
 			else $path[] = $section;
 		}
 
-		$this->path = implode('/', $path);
-		$this->params = $params;
+		$this->setPath(implode('/', $path));
+		$path = explode('/', $this->path);
 
-		if (!empty($path[2])) $this->module = array_shift($path);
+		$this->params = $params;
 
 		$this->controller = $path[0];
 		$this->method = array_get($path, 1);
@@ -201,10 +234,10 @@ class Action
 	 */
 	function fromArray($get)
 	{
-		$this->path = array_get($get, 'r', '');
+		$this->setPath(array_get($get, 'r', ''));
 		$path = explode('/', $this->path);
 		
-		if (!empty($path[2])) $this->module = array_shift($path);
+		//if (!empty($path[2])) $this->module = array_shift($path);
 		
 		$this->controller = $path[0];
 		$this->method = isset($path[1])? $path[1] : '';

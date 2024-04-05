@@ -38,20 +38,17 @@ public $realm;
 /** Check if remote address changed. */
 public $verifyRemote = true;
 
+/** Delete plain-text default password from database on first login. */
+public $cleanDefaultPassword = true;
+
 /** var AuthUser User which is logged in. */
 public $loggedUser;
-
-/** Occurs after login. */
-public $onAfterLogin;
-
-/** Occurs before logout. */
-public $onBeforeLogout;
 
 /**
  * Take \b $user and log him in. See also #$loggedUser.
  * @param AuthUser $user
  */
-function setLoggedUser(pclib\AuthUser $user)
+function setLoggedUser(pclib\AuthUser $user = null)
 {
 	$this->loggedUser = $user;
 	$this->setSessionUser($user);
@@ -64,7 +61,7 @@ protected function getUserIp(pclib\AuthUser $user)
 {
 	$ip = ip2long($this->app->request->getClientIp());
 	if ($ip != $user->values['IP']) {
-		$this->log('AUTH_NOTICE', 'Access from different ip-address.', $user->values['ID']);
+		$this->log('auth/fail', 'auth/ip-address-changed');
 	}
 	return $ip;
 }
@@ -80,6 +77,20 @@ function getUser($userName = null)
 	$user = $this->getStorage()->getUser($userName);
 	if ($user) $user->auth = $this;
 	return $user;
+}
+
+/**
+ * Reload logged user from database.
+ * Use if you need propagate changes immediately.
+ * @return AuthUser $user
+ */
+function reloadLoggedUser()
+{
+	if (!$this->loggedUser) return;
+	$name = $this->loggedUser->values['USERNAME'];
+	$user = $this->getUser($name);
+
+	$this->setLoggedUser($user->isValid()? $user : null);
 }
 
 /**
@@ -131,23 +142,29 @@ function login($userName, $password)
 	if (!$user) $result = 'User does not exists!';
 	else {
 		if (!$user->isValid()) $result = 'Invalid user!';
-		if (!$user->passwordVerify($password)) $result = 'Invalid password!';	
+		if (!$user->passwordVerify($password)) $result = 'Invalid password!';
 	}
 	
 	if ($result == 'LOGIN_OK') {
 		$this->setLoggedUser($user);
 		$user->values['IP'] = $this->getUserIp($user);
+
+		if ($this->cleanDefaultPassword and $user->hasDefaultPassword()) {
+			$user->changePassword($password);
+		}
+
 		$user->values['LAST_LOGIN'] = date('Y-m-d H:i:s');
 		$this->getStorage()->setUser($user);
-		$this->onAfterLogin($user);
+		$this->trigger('auth.login', ['user' => $user]);
 	}
 	else {
+		http_response_code(401);
 		$this->setError($result);
 		if ($user) {
-			$this->log('AUTH_NOTICE', $result, null, $user->values['ID']);
+			$this->log('auth/fail', $result, null, $user->values['ID']);
 		}
 		else {
-			$this->log('AUTH_NOTICE', $result, "Failed login of user '$userName'");
+			$this->log('auth/fail', $result, "Failed login of user '$userName'");
 		}
 	}
 
@@ -159,7 +176,7 @@ function login($userName, $password)
  */
 function logout()
 {
-	$this->onBeforeLogout($this->loggedUser);
+	$this->trigger('auth.logout', ['user' => $this->loggedUser]);
 	$this->loggedUser = null;
 	$this->setSessionUser(null);
 }
@@ -174,7 +191,8 @@ protected function getSessionUser()
 	if (!$data) return null;
 
 	if ($data['sessionHash'] != $this->sessionHash($data)) {
-		$this->log('AUTH_ERROR', 'Authentication failed - invalid session.', $data['ID']);
+		$this->log('auth/fail', 'auth/invalid-session');
+		$this->logout();
 		throw new AuthException("Authentication failed. Access denied.");
 	}
 
@@ -193,6 +211,9 @@ protected function setSessionUser(pclib\AuthUser $user = null)
 	if ($user) {
 		$data = $user->values;
 		$data['sessionHash'] = $this->sessionHash($data);
+	}
+	else {
+		$data = null;
 	}
 	
 	$this->app->setSession('pclib.user', $data, $this->realm);
@@ -222,9 +243,9 @@ function testRight($name, $objectId = 0)
 		return true;
 	}
 
+	http_response_code(403);
 	$message = "Required permission '$name'. Access denied.";
-
-	$this->log('AUTH_ERROR', 'Unauthorized access!', null, $message);
+	$this->log('auth/fail', 'auth/unauthorized-access', $message);
 	throw new AuthException($message);
 }
 

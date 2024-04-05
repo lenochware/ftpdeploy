@@ -23,16 +23,13 @@ class AuthBase extends BaseObject
 /** var App */
 protected $app;
 
-/** var Translator */
-public $translator;
-
 /** Array of error messages (if any) */
 public $errors = array();
 
 /** Secret string used for enpowerment of md5 hash */
 public $secret;
 
-/** Password algorhitm - can be 'md5' or 'bcrypt' */
+/** Password algorhitm - can be 'md5', 'bcrypt', 'bcrypt-md5' */
 public $passwordAlgo;
 
 /** Bcrypt cost. */
@@ -40,9 +37,6 @@ public $passwordCost = 10;
 
 /** Throws exceptions instead of just collecting errors in ->errors */
 public $throwsExceptions = false;
-
-/** Occurs on auth error. */
-public $onError;
 
 /**
  * Constructor - load config parameters.
@@ -71,6 +65,8 @@ function passwordHash($password)
 			return md5($this->secret.$password);
 		case 'bcrypt': 
 			return password_hash($password , PASSWORD_BCRYPT, array('cost' => $this->passwordCost));
+		case 'bcrypt-md5': 
+			return password_hash(md5($this->secret.$password) , PASSWORD_BCRYPT, array('cost' => $this->passwordCost));
 		default:
 			throw new AuthException('Unknown password-hash algorihtm');
 	}	
@@ -89,6 +85,8 @@ function passwordHashVerify($password, $hash)
 			return (md5($this->secret.$password) == $hash);		
 		case 'bcrypt': 
 			return password_verify($password, $hash);
+		case 'bcrypt-md5': 
+			return password_verify(md5($this->secret.$password), $hash);
 		default:
 			throw new AuthException('Unknown password-hash algorihtm');
 	}
@@ -107,19 +105,14 @@ protected function log($category, $messageId, $message = null, $itemId = null)
 function setError($message)
 {
 	$args = array_slice(func_get_args(), 1) ;
-	$message = vsprintf($this->t($message), $args);
+	$message = $this->app->text($message, $args);
 
 	if ($this->throwsExceptions) {
 		throw new AuthException($message);
 	}
 	else {
 		$this->errors[] = $message;
-		$this->onError($message);
 	}
-}
-
-protected function t($s) {
-	return $this->service('translator', false)? $this->translator->translate($s) : $s;
 }
 
 }

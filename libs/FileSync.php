@@ -96,7 +96,7 @@ class FileSync
 	 */
 	function getList($directory, $options = array())
 	{
-		if (!is_dir($directory)) return [];
+		if (!is_dir($directory)) return ['sourcedir' => '', 'files' => []];
 		//$directory = $this->normalizeDir($directory);
 
 		//fix patterns

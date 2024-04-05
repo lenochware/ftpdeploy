@@ -29,7 +29,7 @@ public $db;
 
 public $USERNAME_PATTERN = "/^[a-z0-9\._\-\@]+$/i";
 
-public $defaultPasswordLength = 8;
+public $defaultPasswordLength = 10;
 
 public $USERS_TAB = 'AUTH_USERS',
 	$REGISTER_TAB = 'AUTH_REGISTER',
@@ -80,7 +80,7 @@ public function sname($sname, $type)
 protected function modified($table, $id)
 {
 	$now = date('Y-m-d H:i:s');
-	$this->db->update($table, "LASTMOD='$now'", pri($id));
+	$this->db->update($table, "LASTMOD='$now'", ['ID' => $id]);
 }
 
 /**
@@ -89,7 +89,7 @@ protected function modified($table, $id)
 **/
 function genPassw()
 {
-	return randomstr($this->defaultPasswordLength);
+	return \pclib\Str::random($this->defaultPasswordLength);
 }
 
 /**
@@ -119,10 +119,16 @@ function mkUser($sname, $fullName = null, $srole = null, $annot = '')
 	$user = array (
 	'USERNAME' => $sname,
 	'FULLNAME' => $fullName,
-	'DPASSW' => $this->genPassw(),
+	//'DPASSW' => $this->genPassw(),
 	'DT' => date("Y-m-d H:i:s"),
 	'ANNOT' => $annot
 	);
+
+	$auth = $this->app->getService('auth');
+
+	if (/*PCLIB_VERSION > '2.9.5' and*/ $auth and $auth->loggedUser) {
+		$user['AUTHOR_ID'] = $auth->loggedUser->ID;
+	}
 
 	$id = $this->db->insert($this->USERS_TAB, $user);
 	if ($srole) $this->uRole('#'.$id, $srole);
@@ -141,7 +147,7 @@ function rmUser($sname)
 
 	$this->db->delete( $this->REGISTER_TAB, "USER_ID='{0}'", $uid);
 	$this->db->delete( $this->USERROLE_TAB, "USER_ID='{0}'", $uid);
-	$this->db->delete( $this->USERS_TAB, pri($uid));
+	$this->db->delete( $this->USERS_TAB, ['ID' => $uid]);
 	return $uid;
 }
 
@@ -219,7 +225,7 @@ function rmRight($sname, $force = false)
 			$this->setError('Cannot remove - %s is used.', $sname);
 			return false;
 		}
-	$this->db->delete($this->RIGHTS_TAB, pri($rid));
+	$this->db->delete($this->RIGHTS_TAB, ['ID' => $rid]);
 	if ($force) $this->db->delete($this->REGISTER_TAB, "RIGHT_ID='{0}'", $rid);
 	return true;
 }
@@ -232,7 +238,7 @@ function rmRight($sname, $force = false)
 function setRight($right)
 {
 	$id = $right['ID'];
-	if (!$this->db->exists($this->RIGHTS_TAB, pri($id))) {
+	if (!$this->db->exists($this->RIGHTS_TAB, ['ID' => $id])) {
 		$this->setError('Error: Right %s not exists.', '#'.$id);
 		return false;
 	}
@@ -241,7 +247,7 @@ function setRight($right)
 		return false;
 	}
 	
-	$this->db->update($this->RIGHTS_TAB, $right, pri($id));
+	$this->db->update($this->RIGHTS_TAB, $right, ['ID' => $id]);
 	if ($this->db->drv->error) {
 		$this->setError($this->db->drv->error);
 		return false;
@@ -269,6 +275,13 @@ function mkRole($sname, $annot = '')
 		'LASTMOD' => date("Y-m-d H:i:s"),
 		'DT' => date("Y-m-d H:i:s")
 	);
+
+	$auth = $this->app->getService('auth');
+
+	if (/*PCLIB_VERSION > '2.9.5' and*/ $auth and $auth->loggedUser) {
+		$role['AUTHOR_ID'] = $auth->loggedUser->ID;
+	}
+
 	$id = $this->db->insert($this->ROLES_TAB, $role);
 	return $id;
 }
@@ -291,7 +304,7 @@ function rmRole($sname, $force = false)
 		}
 
 	$this->db->delete($this->REGISTER_TAB, "ROLE_ID='{0}'", $rid);
-	$this->db->delete($this->ROLES_TAB, pri($rid));
+	$this->db->delete($this->ROLES_TAB, ['ID' => $rid]);
 	if ($force) $this->db->delete($this->USERROLE_TAB, "ROLE_ID='{0}'", $rid);
 	return true;
 }
@@ -326,7 +339,7 @@ function cpRole($sname1, $sname2)
 function setRole($role)
 {
 	$id = $role['ID'];
-	if (!$this->db->exists($this->ROLES_TAB, pri($id))) {
+	if (!$this->db->exists($this->ROLES_TAB, ['ID' => $id])) {
 		$this->setError('Error: Role %s not exists.', '#'.$id);
 		return false;
 	}
@@ -335,7 +348,7 @@ function setRole($role)
 		return false;
 	}
 
-	$this->db->update($this->ROLES_TAB, $role, pri($id));
+	$this->db->update($this->ROLES_TAB, $role, ['ID' => $id]);
 	if ($this->db->drv->error) {
 		$this->setError($this->db->drv->error);
 		return false;
@@ -362,7 +375,7 @@ function rGrant($srole, $sright, $rval = '1', $obj_id = 0)
 	if (!$right_id) return false;
 
 	$this->db->delete($this->REGISTER_TAB,
-	"ROLE_ID={0} AND RIGHT_ID={1} AND OBJ_ID='{2}'",
+	"ROLE_ID='{0}' AND RIGHT_ID='{1}' AND OBJ_ID='{2}'",
 	$role_id, $right_id, $obj_id);
 
 	if (isset($rval)) {
@@ -396,7 +409,7 @@ function uGrant($suser, $sright, $rval = '1', $obj_id = 0)
 	if (!$right_id) return false;
 
 	$this->db->delete($this->REGISTER_TAB,
-	"USER_ID={0} AND RIGHT_ID={1} AND OBJ_ID='{2}'",
+	"USER_ID='{0}' AND RIGHT_ID='{1}' AND OBJ_ID='{2}'",
 	$user_id, $right_id, $obj_id);
 	if (isset($rval)) {
 		$right = array(
@@ -432,7 +445,7 @@ function uRole($suser, $srole, $assign = true, $obj_id = 0)
 
 	if ($assign) {
 		if ($this->db->exists(
-			$this->USERROLE_TAB, "USER_ID={0} AND ROLE_ID={1}", $uid, $rid)) {
+			$this->USERROLE_TAB, "USER_ID='{0}' AND ROLE_ID='{1}'", $uid, $rid)) {
 				$this->setError('User already has this role.');
 				return false;
 			}
@@ -465,7 +478,7 @@ function getUser($sname)
 {
 	$uid = $this->sname($sname, 'user');
 	if (!$uid) return false;
-	$user = $this->db->select($this->USERS_TAB, pri($uid));
+	$user = $this->db->select($this->USERS_TAB, ['ID' => $uid]);
 	return $user;
 }
 
@@ -480,7 +493,7 @@ function getUser($sname)
 function setUser($sname, array $user)
 {
 	$uid = $this->sname($sname, 'user');
-	if (!$this->db->exists($this->USERS_TAB, pri($uid))) {
+	if (!$this->db->exists($this->USERS_TAB, ['ID' => $uid])) {
 		$this->setError('Error: User %s not exists.', '#'.$uid);
 		return false;
 	}
@@ -496,7 +509,7 @@ function setUser($sname, array $user)
 		$user['USERNAME'] = strtolower($user['USERNAME']);
 	}
 
-	$this->db->update($this->USERS_TAB, $user, pri($uid));
+	$this->db->update($this->USERS_TAB, $user, ['ID' => $uid]);
 	if ($this->db->drv->error) {
 		$this->setError($this->db->drv->error);
 		return false;
@@ -506,8 +519,7 @@ function setUser($sname, array $user)
 }
 
 /**
- * Set password $passw for user $sname. Password with length < 6
- * generates warning. Empty password will enable default password.
+ * Set password $passw for user $sname.
  * @param string $sname "user_name" or "#user_id"
  * @param string $passw Password
  * @return bool $ok
@@ -517,7 +529,7 @@ function setPassw($sname, $passw)
 	$uid = $this->sname($sname, 'user');
 	if (!$uid) return false;
 	if (strlen($passw) > 0) $passw = $this->passwordHash($passw);
-	$this->db->update($this->USERS_TAB, "PASSW='$passw'", pri($uid));
+	$this->db->update($this->USERS_TAB, "PASSW='$passw',DPASSW=''", ['ID' => $uid]);
 	$this->modified($this->USERS_TAB, $uid);
 	return true;
 }

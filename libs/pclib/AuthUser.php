@@ -48,6 +48,23 @@ function isValid()
 }
 
 /**
+ * Create new instance of $className and copy user data into.
+ * @return object AuthUserClass
+ */
+function asObject($className)
+{
+	$user = new $className;
+	if (!($user instanceof AuthUser)) {
+		throw new Exception ("'$className' must be child of AuthUser");
+	}
+
+	$user->values = $this->values;
+	$user->auth = $this->auth;
+
+	return $user;
+}
+
+/**
  * Check if user has permission $name.
  * @param string $name Permission
  * @param int $objectId Resource object id
@@ -104,6 +121,23 @@ function getCredentials()
 }
 
 /**
+ * PHP magic method.
+ * Implements following features:
+ * - Access to column value as $model->columnName
+ */
+public function __get($name)
+{
+	return $this->values[$name];
+}
+
+/*
+public function __set($name, $value)
+{
+	$this->values[$name] = $value;
+}
+*/
+
+/**
  * Verify user password.
  * @param string $password
  * @return bool $valid
@@ -117,6 +151,16 @@ function passwordVerify($password)
 		return ($cred[2] == $password);
 	}
 	else return $this->service('auth')->passwordHashVerify($password, $cred[1]);
+}
+
+/**
+ * Change user password.
+ * @param string $password
+ */
+function changePassword($password)
+{
+	$am = new pclib\extensions\AuthManager;
+	$am->setPassw($this->values['USERNAME'], $password);
 }
 
 }

@@ -29,10 +29,10 @@ class TextLogger
 		fwrite($this->file, $message."\n");
 		$this->output .= $message."\n";
 
-		if ($options['output'] == 'screen') {
-				print "$message<br>";
-				flush();
-		}
+		// if ($options['output'] == 'screen') {
+		// 		print "$message<br>";
+		// 		flush();
+		// }
 	}
 
 }

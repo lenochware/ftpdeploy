@@ -10,16 +10,14 @@ use pclib\system\BaseObject;
  */
 class DebugBar
 {
-protected $logger;
 protected $app;
 
 protected $queryTime;
 protected $startTime;
 protected $queryTimeSum;
 
-protected $positionDefault = 'position:absolute;top:10px;right:10px;';
+protected $positionDefault = 'position:fixed;bottom:10px;right:10px;';
 
-protected $updating = false;
 public $registered = false;
 
 private static $instance;
@@ -29,12 +27,16 @@ private function __construct()
 	global $pclib;
 	$this->app = $pclib->app;
 
-	//Use logger with independent db connection to avoid conflicts.
-	$this->logger = new PCLogger('debuglog');
-	$this->logger->storage = new \pclib\system\storage\LoggerDbStorage($this->logger);
-	$this->logger->storage->db = clone $this->app->db;
+	if (!isset($_SESSION['pclib.debuglog'])) {
+		$_SESSION['pclib.debuglog'] = [];
+	}
 
-	$this->logUrl();	
+	if (!$this->isDebugBarRequest()) {
+		if (isset($_SESSION['pclib.debuglog.viewed'])) $_SESSION['pclib.debuglog'] = [];
+		$_SESSION['pclib.debuglog.viewed'] = null;
+	}	
+
+	$this->logUrl();
 }
 
 public static function getInstance()
@@ -42,15 +44,8 @@ public static function getInstance()
   if (self::$instance === null) {
       self::$instance = new self;
   }
-  return self::$instance;
-}
 
-function addEvents($events)
-{
-	foreach ($events as $name => $closure) {
-		list($className, $eventName) = explode('.', $name);
-		BaseObject::$defaults[$className][$eventName][] = $closure;
-	}
+  return self::$instance;
 }
 
 public static function register()
@@ -59,49 +54,47 @@ public static function register()
 
 	if ($that->registered) return;
 
-	$events = array(
-		'pclib\App.onBeforeOut' => array($that, 'hook'),
-		'pclib\App.onAfterOut' => array($that, 'hook'),
-		'pclib\App.onBeforeRun' => array($that, 'hook'),
-		'pclib\App.onError' => array($that, 'hook'),
-		'pclib\Db.onBeforeQuery' => array($that, 'hook'),
-		'pclib\Db.onAfterQuery' => array($that, 'hook'),
-		//'Func.onLogDump' => array($that, 'onLogDump'),
-	);
+	$events = [
+		'app.before-out' => [$that, 'onBeforeOut'],
+		'app.after-out'  => [$that, 'onAfterOut'],
+		'app.before-run' => [$that, 'onBeforeRun'],
+		'app.error' => [$that, 'onError'],
+		'php-exception'   => [$that, 'onPhpException'],
+		'db.before-query' => [$that, 'onBeforeQuery'],
+		'db.after-query'  => [$that, 'onAfterQuery'],
+		'router.redirect' => [$that, 'onRedirect'],
+	];
 
 	$that->addEvents($events);
-	
-	$that->app->loadDefaults();
-	if ($that->app->db) {
-		$that->app->db->loadDefaults();
-	}
-
+		
 	$that->startTime = microtime(true);
 	$that->queryTimeSum = 0;
 	$that->registered = true;
 }
 
+
+protected function addEvents($events)
+{
+	foreach ($events as $name => $fn) {
+		$this->app->events->on($name, $fn);
+	}
+}
+
+protected function log($category, $message)
+{
+	if ($this->isDebugBarRequest()) return;
+	$_SESSION['pclib.debuglog'][] = ['category' => $category, 'message' => $message];
+}
+
 function html()
 {
-	$t = new PCTpl(PCLIB_DIR.'assets/debugbar.tpl');
-	$t->values['POSITION'] = $this->app->config['pclib.debugbar.position'] ?: $this->positionDefault;
+	$t = new PCTpl(PCLIB_DIR.'tpl/debugbar.tpl');
+	$t->values['POSITION'] = array_get($this->app->config, 'pclib.debugbar.position', $this->positionDefault);
 	$t->values['VERSION'] = PCLIB_VERSION;
 	$t->values['TIME'] = $this->getTime($this->startTime);
 	$t->values['MEMORY'] = round(memory_get_peak_usage()/1048576,2);
-
+	
 	return $t->html();
-}
-
-function hook($event)
-{
-	if(strpos($event->data[0], 'debuglog')) dump($this->updating,$event->data);
-
-	if ($this->updating) return;
-
-	$this->updating = true;
-	$name = $event->name;
-	$this->$name($event);
-	$this->updating = false;
 }
 
 function onBeforeOut($event)
@@ -113,24 +106,23 @@ function onBeforeOut($event)
 function onAfterOut($event)
 {
 	$message = "Time: ". $this->getTime($this->startTime).' ms, db: '.$this->queryTimeSum.' ms';
-	$this->logger->log('DEBUG', 'time', $message);
+	$message = "<b>$message</b>";
+	$this->log('time', $message);
 }
 
 
 function onBeforeRun($event)
 {
-	if ($this->app->routestr == 'pclib/debuglog') {
-		$this->printLogWindow();
-		$event->propagate = false;
+	if (!$this->isDebugBarRequest()) return;
+
+	switch ($event->action->method) {
+		case 'show': $this->printLogWindow(); break;
+		case 'variables': $this->printInfoWindow(); break;
+		case 'clear': $_SESSION['pclib.debuglog.viewed'] = true; break;
+		case 'cshow': $_SESSION['pclib.debuglog'] = []; $this->printLogWindow(); break;
 	}
-	if ($this->app->routestr == 'pclib/debuglog/clear') {
-		$this->logger->deleteLog(0);
-		$event->propagate = false;
-	}
-	elseif($this->app->routestr == 'pclib/debuginfo') {
-		$this->printInfoWindow();
-		$event->propagate = false;
-	}
+
+	$event->propagate = false;
 }
 
 function onBeforeQuery($event)
@@ -142,36 +134,26 @@ function onAfterQuery($event)
 {
 	$msec = $this->getTime($this->queryTime);
 	$this->queryTimeSum += $msec;
-	$this->logger->log('DEBUG', 'query',
-		preg_replace("/(\s*[\r\n]+\s*)/m", "\\1<br>", $event->data[0]) // \n => <br>
-		." <span style=\"color:blue\">($msec ms)</span>"
-	);
+	$this->log('query', htmlspecialchars($event->sql) ." <span style=\"color:blue\">($msec ms)</span>");
 }
 
 function onError($event)
 {
-	$this->logger->log('DEBUG', 'error', $event->data[0]);
+	$this->log('error', "<span style=\"color:red\">".$event->message."</span>");
 }
 
-function onLogDump($event)
+function onPhpException($event)
 {
-	$dbg = $this->app->debugger;
+	$this->log('error', $event->Exception->getMessage() . $this->app->debugger->getTrace($event->Exception));
+}
 
-	$dbg->useHtml = false;
-	$path = htmlspecialchars($dbg->tracePath(2));
-	$dbg->useHtml = true;
-
-	$this->logger->log('DEBUG', 'DUMP',
-		"<span title=\"$path\">".$dbg->getDump($event->data).'</span>'
-	);
+function onRedirect($event)
+{
+	$this->log('redirect', 'Redirect to ' . $event->url);
 }
 
 protected function logUrl()
 {
-	if (strpos($this->app->routestr, 'pclib/debuglog') === 0) return;
-
-	$this->updating = true;
-
 	$request = $this->app->request;
 	$message = '<b>'
 	.($request->isAjax()? 'AJAX ': '')
@@ -179,30 +161,30 @@ protected function logUrl()
 	.'</b> '
 	.$request->url;
 
-	if ($request->method == 'POST')
-		$message .= '<br>'.$this->app->debugger->getDump(array($_POST));
+	$this->log('url', $message);
 
-	$this->logger->log('DEBUG', 'url', $message);
-	$this->updating = false;
+	if ($request->method == 'POST') {
+		$this->log('dump', $this->getDump($_POST));
+	}	
 }
 
 protected function printLogWindow()
 {
-	$grid = new PCGrid(PCLIB_DIR.'assets/debuglog.tpl');
-	$data = $this->logger->getLog(100, array('LOGGERNAME' => $this->logger->name));
-	$grid->setArray($data);
-	print $grid;
+	print file_get_contents(PCLIB_DIR.'tpl/debugmenu.tpl');
+	//print '<h4>Debug Log</h4>';
+	$grid = new PCGrid(PCLIB_DIR.'tpl/debuglog.tpl');
+	$grid->setArray($_SESSION['pclib.debuglog']);
+	print $grid;	
 	die();
 }
 
 protected function printInfoWindow()
 {
-	$dbg = $this->app->debugger;
-	print "<a href=\"?r=pclib/debuglog/clear\">Clear debuglog</a><br>";
-	print '<h1>_SESSION</h1>';
-	print $dbg->getDump(array($_SESSION));
-	print '<h1>_COOKIE</h1>';
-	print $dbg->getDump(array($_COOKIE));
+	print file_get_contents(PCLIB_DIR.'tpl/debugmenu.tpl');
+	print '<h4>_SESSION</h4>';
+	print $this->getDump($_SESSION);
+	print '<h4>_COOKIE</h4>';
+	print $this->getDump($_COOKIE);
 	die();
 }
 
@@ -211,6 +193,21 @@ protected function getTime($startTime)
 	return round((microtime(true) - $startTime) * 1000, 1);
 }
 
+protected function isDebugBarRequest()
+{
+	return ($this->app->controller == 'pclib_debugbar');
 }
 
-?>
+protected function getDump()
+{
+	return $this->app->debugger->getDump(func_get_args());
+}
+
+public function dump($vars)
+{
+	$dbg = $this->app->debugger;
+	$message = $dbg->getDump($vars);
+	$this->log('dump', $message);
+}
+
+}

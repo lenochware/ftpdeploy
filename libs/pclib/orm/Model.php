@@ -49,6 +49,8 @@ protected $modified = array();
 /** Role used by model for data access. */
 protected $accessRole;
 
+protected $relationsCache = array();
+
 protected static $columnsCache = array();
 
 protected static $options = array(
@@ -68,7 +70,7 @@ function __construct($tableName, array $values = array())
 
 	$this->service('db');
 
-	if (!preg_match("/^\w+$/", $tableName)) {
+	if (!preg_match("/^[a-z0-9_.]+$/i", $tableName)) {
 		throw new Exception("Invalid table name.");
 	}
 
@@ -106,9 +108,14 @@ public static function className($tableName)
 	$className = self::canonicalName($tableName).'Model';
 	$path = self::getFilePath($className, '.php');
 
-	if (!file_exists($path)) return self::$options['defaultClassName'];
-	require_once($path);
-	return $className;
+	if (file_exists($path)) {
+		require_once($path);
+		return $className;
+	}
+
+	//if (class_exists($className)) return $className;
+
+	return self::$options['defaultClassName'];
 }
 
 protected static function canonicalName($tableName)
@@ -164,7 +171,7 @@ protected function getValidator()
  */
 function getColumns()
 {
-	$cols = self::$columnsCache[$this->tableName];
+	$cols = array_get(self::$columnsCache, $this->tableName);
 	if (!$cols) {
 		$cols = $this->db->columns($this->tableName);
 		self::$columnsCache[$this->tableName] = $cols;
@@ -304,12 +311,13 @@ function hasColumn($name)
 
 protected function getElement($name)
 {
-	return $this->getTemplate()->elements[$name];
+	return array_get($this->getTemplate()->elements, $name);
 }
 
 protected function isCalculated($name)
 {
-	return $this->getTemplate()->elements['model']['calculated'][$name];
+	$calculated = $this->getTemplate()->elements['model']['calculated'];
+	return isset($calculated[$name]);
 }
 
 /**
@@ -321,7 +329,7 @@ protected function isCalculated($name)
 public function __get($name)
 {
 	$el = $this->getElement($name);
-	if ($el['type'] == 'relation') {
+	if ($el and $el['type'] == 'relation') {
 		return $this->related($name);
 	}
 
@@ -344,10 +352,15 @@ public function __set($name, $value)
  */
 function related($name)
 {
+	if ($this->relationsCache[$name]) {
+		return $this->relationsCache[$name];
+	}
+
 	$rel = new Relation($this, $name);
 
 	if ($rel->params['owner'] or $rel->params['one']) {
-		return $rel->first();
+		$this->relationsCache[$name] = $rel->first();
+		return $this->relationsCache[$name];
 	}
 	else return $rel;
 }
@@ -381,10 +394,16 @@ function save()
 	if (!$this->testRight('save')) return false;
 
 	if (!$this->modified) return true;
+
+	$this->trigger('model.before-save');
+
 	$ok = $this->isInDb()? $this->update() : $this->insert();
 	if ($ok) {
 		$this->isInDb(true);
 	}
+
+	$this->trigger('model.after-save', ['ok' => $ok]);
+
 	return $ok;
 }
 
@@ -488,6 +507,8 @@ function delete()
 
 	$this->validateRelated();
 
+	$this->trigger('model.before-delete');
+
 	//startTransaction
 	$ok = $this->db->delete($this->tableName, array(self::$options['primaryKey'] => $id));
 	$this->deleteRelated();
@@ -498,6 +519,7 @@ function delete()
 		$this->modified = array_keys($this->values);
 	}
 
+	$this->trigger('model.after-delete', ['ok' => $ok]);
 	return $ok;
 }
 
@@ -611,7 +633,7 @@ function setValue($name, $value)
 		throw new MemberAccessException("Cannot write to an undeclared property $class->$name.");    
 	}
 
-	if ($this->values[$name] === $value) return;
+	if (array_get($this->values, $name) === $value) return;
 	if ( !$this->testRight(array('write', $name)) ) return false;
 
 	$this->values[$name] = $value;
@@ -639,6 +661,7 @@ function getValue($name)
 protected function getCalculated($name)
 {
 	$el = $this->getElement($name);
+	if ($el['get'] == 1) $el['get'] = 'get'.ucfirst($name);
 
 	if (!method_exists($this, $el['get'])) {
 		$class = get_class($this);
@@ -651,6 +674,7 @@ protected function getCalculated($name)
 protected function setCalculated($name, $value)
 {
 	$el = $this->getElement($name);
+	if ($el['set'] == 1) $el['set'] = 'set'.ucfirst($name);
 
 	if (!method_exists($this, $el['set'])) {
 		$class = get_class($this);

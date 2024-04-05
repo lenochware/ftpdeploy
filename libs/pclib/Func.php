@@ -12,35 +12,6 @@
 # License as published by the Free Software Foundation; either
 # version 2.1 of the License, or (at your option) any later version.
 
-/** Placeholders in string $str will be replaced with values from $param array.
- *  Format is the same like for template file. \n
- *  Ex: print paramstr("{A} is {B}", array('A' => 'pclib', 'B' => 'best')); \n
- *  $param can be two-dimensional array of n-rows, each row is formated with string $str.
- *
- * @param string $str string with {PARAM} parameters (placeholders)
- * @param array $param associative array PARAM=>VALUE
- * @param bool $keepEmpty Keep (don't delete) tags undefined in $param
- * @return string $str
- */
-function paramstr($str, $param, $keepEmpty = false)
-{
-	preg_match_all("/{([a-z0-9_.]+)}/i", $str, $found);
-	if (!$found[1]) return $str;
-	if (!is_array(array_get($param, 0))) $param = array($param);
-
-	$n = count($param);
-	$newstr = '';
-	for ($i = 0; $i < $n; $i++) {
-		$from = $to = null;
-		foreach($found[1] as $key) {
-			if ($keepEmpty and !isset($param[$i][$key])) continue;
-			$from[] = '{'.$key.'}';
-			$to[] = $param[$i][$key];
-		}
-		$newstr .= str_replace($from, $to, $str);
-	}
-	return $newstr;
-}
 /**
  * Dump variable(s) for debugging and stop application.
  * Usage: dump($a,$b,...);
@@ -56,52 +27,57 @@ function dump()
 }
 
 /**
+ * Dump variable(s) for debugging to the debug log.
+ * Usage: ddump($a,$b,...);
+ **/
+function ddump()
+{
+	$dd = pclib\Extensions\DebugBar::getInstance();
+	$dd->dump(func_get_args());
+}
+
+/**
  * Dump variable(s) for debugging to the javascript console.
  * Usage: jdump($a,$b,...);
  **/
 function jdump()
 {
 	global $pclib;
-	$js = '';
 	$args = func_get_args();
+
+	$js = $pclib->app->getSession('pclib.jdump') ?: '';
 	
 	foreach($args as $var) {
-		$js .= 'console.log('.json_encode($var).');';
+		
+		if (is_object($var)) {
+			$var = ["__class__" => "[object ".get_class($var)."]"] + (array)$var;
+		}
+
+		if (is_array($var)) {
+			$output = [];
+			foreach ($var as $key => $value) {
+				if (is_object($value)) $value = "[object ".get_class($value)."]";
+				if (is_array($value)) $value = "[array(".count($value).")]";
+				$key = str_replace("\0", ' ', $key);
+				$output[$key] = $value;
+			}
+
+			$output = ["__class__" => "[PHPArray(".count($var).")]"] + (array)$output;
+		}
+		else {
+			$output = $var;
+		}
+
+		$js .= 'console.log('.json_encode($output).');';
 	}
-	
-	if ($pclib->app->layout)
-		$pclib->app->layout->addInline("<script>$js</script>");
-	else
-		print "<script>$js</script>";
+
+	$pclib->app->setSession('pclib.jdump', $js);
 }
-
-/**
- * Dump variable(s) for debugging to the text file / database log.
- * Usage: logdump($a,$b,...);
- **/
-function logdump()
-{
-	global $pclib;
-	$app = $pclib->app;
-	$args = func_get_args();
-	
-	$debug = $app->debugger;
-	$sav = $debug->useHtml;
-	$debug->useHtml = false;
-	$s = $debug->getDump($args);
-	$debug->useHtml = $sav;
-
-	$dir = $app->config['pclib.directories']['logs'];
-	$logfile = $dir.'logdump.log';
-	$s = "\n--- ".date("Y-m-d H:i:s")." ---\n".$s;
-	file_put_contents($logfile, $s, FILE_APPEND);
-}
-
 
 /** 
  * Return string "ID='$id'".
- * Helper for db queries on primary key. \n
- * Ex: $db->select('PRODUCTS', pri($id));
+ * Helper for db queries on primary key.
+ * @deprecated Use [ID => $id] instead.
  */
 function pri($id)
 {
@@ -109,71 +85,13 @@ function pri($id)
 	return "ID='$id'";
 }
 
-/**
- * Return part of the filesystem path.
- * Format can use placeholders %d directory, %f filename, %e extension.
- * Example: extractpath($path, "%f.%e"); //return "filename.extension"
+/** 
+ * Replace {param} placeholders in string with values from array $param.
+ * @deprecated Use Str::format() instead.
  */
-function extractpath($path, $format)
+function paramStr($str, $params, $keepEmpty = false)
 {
-	$path_a = pathinfo($path);
-	$trans = array(
-		'%d' => rtrim($path_a['dirname'],"/\\"),
-		'%f' => $path_a['filename'],
-		'%e' => $path_a['extension'],
-	);
-	return strtr($format, $trans);
-}
-
-/**
- * Convert string to identificator.
- * Convert characters to ascii and remove other characters. You can set words
- * separator or convert to uppercase/lowercase.
- *
- * @param string $s input text
- * @param string $options ex: '' : camelcase, '-' : 'camel-case', '_U': CAMEL_CASE etc.
- * @return string $identificator
-**/
-function mkident($s, $options = '')
-{
-	$s = preg_replace('/[^\w]+/',' ', utf8_ascii($s));
-	if (strlen($options) == 1) {
-	 if(ctype_alnum($options)) $o1 = $options; else $o2 = $options;
-	}
-	else { $o1 = $options[1]; $o2 = $options[0]; }
-
-	switch($o1) {
-		case 'u': $s = ucwords($s);    break;
-		case 'U': $s = strtoupper($s); break;
-		case 'l': $s = strtolower($s); break;
-	}
-	$s = str_replace(' ',$o2, $s);
-	return $s;
-}
-
-/**
- * Similar to array_shift() but for string.
- * Return beginning of the string to the separator $separ, shortening original $str
- */
-function str_shift($separ, &$str)
-{
-	$pos = strpos($str, $separ);
-	if ($pos === false) return '';
-	$beg = substr($str, 0, $pos);
-	$str = substr($str, $pos + strlen($separ));
-	return $beg;
-}
-
-/**
- * Convert string to pcl identificator, valid for system purposes.
- * Reduce input text to alphanumeric characters plus underscore, dot and hyphen
- *
- * @param string $str input text
- * @return string $identificator system correct
-**/
-function pcl_ident($str)
-{
-	return preg_replace("/[^a-z0-9_\-\.]/i","", strtr($str,' -','__'));
+	return pclib\Str::format($str, $params, $keepEmpty);
 }
 
 function pcl_build_query($query_data)
@@ -191,7 +109,7 @@ function pcl_build_query($query_data)
 function mimetype($path)
 {
 	global $app;
-	$ext = extractpath($path,'%e');
+	$ext = strtolower(Str::extractPath($path,'%e'));
 	if ($app and $app->config['pclib.mimetypes'][$ext])
 		$ret = $app->config['pclib.mimetypes'][$ext];
 	else
@@ -207,7 +125,7 @@ function mimetype($path)
 function filedata($path, $force_download = false, $filename = null)
 {
 	if (!file_exists($path)) throw new Exception('File not found.'); //FileNotFoundException;
-	if (!$filename) $filename = extractpath($path, '%f.%e');
+	if (!$filename) $filename = Str::extractPath($path, '%f.%e');
 
 	if ($force_download) {
 		header('Content-type: '.mimetype($path));
@@ -223,16 +141,17 @@ function filedata($path, $force_download = false, $filename = null)
 }
 
 /**
- * Return string of size $size with random characters.
+ * Configure session cookie for safe usage and call session_start().
 **/
-function randomstr($size, $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ')
+function safe_session_start($httpsOnly = false)
 {
-	$s = '';
-	$max = mb_strlen($characters, '8bit') - 1;
-	for ($i = 0; $i < $size; ++$i) {
-		$s .= $characters[mt_rand(0, $max)];
-	}
-	return $s;
+  //ini_set('session.use_only_cookies', 1);
+  ini_set('session.cookie_httponly', 1);
+  if ($httpsOnly) ini_set('session.cookie_secure', 1);
+  ini_set('session.use_strict_mode', 1);
+  ini_set('session.cookie_samesite', 'lax');
+
+  session_start();
 }
 
 /* fnmatch does not exists on windows systems */
@@ -242,89 +161,19 @@ if(!function_exists('fnmatch')) {
 		}
 } // end if
 
-// Utf-8 wrapper
-
-function utf8_preg_replace($pattern, $replacement ,$subject)
-{
-	if (extension_loaded('mbstring')) $pattern .= 'u';
-	return preg_replace($pattern, $replacement ,$subject);
-}
-
-
-function utf8_substr($s , $start, $length = null)
-{
-	return extension_loaded('mbstring')? mb_substr($s , $start,
-		is_null($length)? mb_strlen($s, 'UTF-8') : $length, 'UTF-8')
-		: substr($s , $start, $length);
-}
-
-function utf8_strpos($haystack , $needle ,$offset = 0)
-{
-	return extension_loaded('mbstring')? mb_strpos($haystack , $needle ,$offset, 'UTF-8')
-		: strpos($haystack , $needle ,$offset);
-}
-
-function utf8_strlen($s)
-{
-	return extension_loaded('mbstring')? mb_strlen($s, 'UTF-8') : strlen($s);
-}
-
-function utf8_strtoupper($s)
-{
-	return extension_loaded('mbstring')? mb_strtoupper($s, 'UTF-8') : strtoupper($s);
-}
-
-function utf8_strtolower($s)
-{
-	return extension_loaded('mbstring')? mb_strtolower($s, 'UTF-8') : strtolower($s);
-}
-
-//Remove accents in $s
-function utf8_ascii($s)
-{
-	static $accents = array(
-	//german
-	'ä'=>'a','ö'=>'o','ü'=>'u','ß'=>'ss',
-	'Ä'=>'A','Ö'=>'O','Ü'=>'U',
-	//french
-	'û'=>'u','ÿ'=>'y','â'=>'a','æ'=>'ae','ç'=>'c','ê'=>'e','ë'=>'e','ï'=>'i','î'=>'i','ô'=>'o','œ'=>'oe',
-	'Û'=>'U','Ÿ'=>'Y','Â'=>'A','Æ'=>'AE','Ç'=>'C','Ê'=>'E','Ë'=>'E','Ï'=>'I','Î'=>'I','Ô'=>'O','Œ'=>'OE',
-	//czech
-	'ú'=>'u','ů'=>'u','ý'=>'y','ž'=>'z','á'=>'a','č'=>'c','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ň'=>'n','ó'=>'o','ř'=>'r','š'=>'s','ť'=>'t',
-	'Ú'=>'U','Ů'=>'U','Ý'=>'Y','Ž'=>'Z','Á'=>'A','Č'=>'C','Ď'=>'D','É'=>'E','Ě'=>'E','Í'=>'I','Ň'=>'N','Ó'=>'O','Ř'=>'R','Š'=>'S','Ť'=>'T',
-	//italian
-	'à'=>'a','è'=>'e','ì'=>'i','ò'=>'o','ù'=>'u',
-	'À'=>'A','È'=>'E','Ì'=>'I','Ò'=>'O','Ù'=>'U',
-	//polish
-	'ą'=>'a','ć'=>'c','ę'=>'e','ł'=>'l','ń'=>'n','ś'=>'s','ź'=>'z','ż'=>'z',
-	'Ą'=>'A','Ć'=>'C','Ę'=>'E','Ł'=>'L','Ń'=>'N','Ś'=>'S','Ź'=>'Z','Ż'=>'Z',
-	//spanish
-	'ñ'=>'n','Ñ'=>'N',
-	//swed/danisch/dutch/fin/nor
-	'å'=>'a','ø'=>'o',
-	'Å'=>'A','Ø'=>'O',
-	//hungarian
-	'ő'=>'o','ű'=>'u',
-	'Ő'=>'O','Ű'=>'U',
-	);
-
-	return preg_replace('/[^(\x20-\x7F)]*/','', strtr($s, $accents));
-}
-
-
-function utf8_htmlspecialchars($s)
-{
-	return htmlspecialchars($s, ENT_COMPAT, 'UTF-8');
-}
-
-function startsWith($s, $substr)
-{
-	return (strpos($s, $substr) === 0);
-}
-
 function array_get($a, $key, $default = null)
 {
+	if (is_array($key)) {
+		return isset($a[$key[0]])? (isset($a[$key[0]][$key[1]])? $a[$key[0]][$key[1]] : $default) : $default;
+	}
+
 	return isset($a[$key])? $a[$key] : $default;
+}
+
+function jdump_sql()
+{
+  global $app;
+  $app->db->on('db.after-query', function($e) { jdump($e->data['sql']); });
 }
 
 ?>
