@@ -341,7 +341,7 @@ public function diffAction($file, $repository)
   $fs->connect($config['remote']);
   $from_file = $fs->getFile($file);
 
-  if ($config['charset']) {
+  if (!empty($config['charset'])) {
     $from_file = iconv($config['charset'], 'utf-8', $from_file);
     $to_file = iconv($config['charset'], 'utf-8', $to_file);
 
