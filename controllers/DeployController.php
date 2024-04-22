@@ -42,13 +42,13 @@ function initAction($task)
   $files = $fs->getList($config['local'], $config);
   $hashes = $this->createHashArray($files, true);
 
-  if ($_POST['save']) {
+  if (isset($_POST['save'])) {
     $this->saveHashFile($task, $hashes);
     $this->app->message('Soubory byly přidány.');
     $this->logger->log('Init '.now()." Úloha inicializována.\n");
     $this->app->redirect('deploy/preview/task:'.$task);
   }
-  elseif($_POST['no_save']) {
+  elseif(isset($_POST['no_save'])) {
     $this->saveHashFile($task, []);
     $this->logger->log('Init '.now()." Úloha inicializována.\n");
     $this->app->redirect('deploy/preview/task:'.$task);    
@@ -245,10 +245,10 @@ protected function prepareData($config, $data)
 }
 
 protected function getDiff($sourceDir, $savedHashes, $hashes)
-{
+{  
   $diffArray = array();
   foreach ($hashes as $fileName => $hash) {
-    $savedHash = $savedHashes[$fileName];
+    $savedHash = array_get($savedHashes, $fileName, null);
     unset($savedHashes[$fileName]);
 
     if (is_array($savedHash)) {
