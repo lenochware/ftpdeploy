@@ -121,6 +121,7 @@ class FileSync
 	protected function scanDirectory($root, $dir, $options)
 	{
 		$files = [];
+		$dir = $this->normalizeDir($dir);
 		$objects = scandir($dir);
 
 		foreach ($objects as $object)
