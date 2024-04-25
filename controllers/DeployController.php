@@ -87,7 +87,7 @@ function previewAction($task)
   $grid->values['TASK'] = $task;
   $grid->values['TOTAL'] = count($data);
 
-  $datasource = parse_url($config['remote']);
+  $datasource = parse_url($config['remote']) + ['host' => '', 'scheme' => '', 'path' => ''];
   $grid->values['HOST'] = $datasource['host'];
 
   if ($datasource['scheme'] =='ftps') {
@@ -285,7 +285,18 @@ protected function loadHashFile($task)
 
 protected function getConfig($task)
 {
-  return include('config/'.$task.'.php');
+  $options = include('config/'.$task.'.php');
+
+  $include = array_get($options, 'include', []);
+  $exclude = array_get($options, 'exclude', []);
+  $dir = rtrim(str_replace("\\", "/", $options['local']), '/');
+
+  $pathFunc = function($s) use($dir) { return str_replace('~', $dir, $s); };
+
+  $options['include'] = array_map($pathFunc, $include);
+  $options['exclude'] = array_map($pathFunc, $exclude);
+
+  return $options;
 }
 
 protected function saveHashFile($task, $hashes)
