@@ -104,9 +104,14 @@ class FileSync
 			if (substr($value,-2) == '/*') $options['exclude'][$i] = substr($value, 0, -2);
 		}
 
+		$include = [];
 		foreach (array_get($options, 'include', []) as $i => $value) {
-			if (substr($value,-2) == '/*') $options['include'][$i] = substr($value, 0, -2);
+			if (substr($value,-2) == '/*') $value = substr($value, 0, -2);
+			$include[] = $value;
+			if (is_dir($value)) $include[] = $value . '/*';
 		}
+
+		$options['include'] = $include;
 
 		$root = $this->normalizeDir($directory).'/';
 
@@ -256,6 +261,11 @@ class FtpDriver
   public function getFile($filePath)
   {
       @ftp_chdir($this->connection, $this->rootDir);
+      
+      if (ftp_size($this->connection, $this->rootDir.'/'.$filePath) == -1) {
+      	return '';
+      }
+
       ob_start();
       $result = @ftp_get($this->connection, 'php://output', $this->rootDir.'/'.$filePath, FTP_BINARY);
       $data = ob_get_contents();
