@@ -40,6 +40,7 @@ function initAction($task)
 
   $fs = new FileSync;
   $files = $fs->getList($config['local'], $config);
+
   $hashes = $this->createHashArray($files, true);
 
   if (isset($_POST['save'])) {
@@ -108,7 +109,7 @@ function skipAction($task)
   $sourcedir = $config['local'];
 
   foreach ($rows as $row) {
-    list($fileName, $status) = explode(' ', $row['FILE']);
+    list($fileName, $status) = explode('*', $row['FILE']);
 
     if (file_exists($sourcedir.'/'.$fileName)) {
       $hashes[$fileName] = $this->hash($sourcedir.'/'.$fileName);
@@ -207,7 +208,7 @@ protected function prepareData($config, $data)
   $unwatch = array();
 
   foreach ((array)$data as $row) {
-    list($fileName, $status) = explode(' ', $row['FILE']);
+    list($fileName, $status) = explode('*', $row['FILE']);
     switch ($status) {
       case 'deleted':
         $deleted[] = $fileName;
@@ -223,7 +224,7 @@ protected function prepareData($config, $data)
         break;
       
       default:
-        $this->logger->log(paramstr("Unknown status '{0}' of file '{1}'", $status, $fileName));
+        $this->logger->log(paramstr("Unknown status '{0}' of file '{1}'", [$status, $fileName]));
         break;
     }
   }

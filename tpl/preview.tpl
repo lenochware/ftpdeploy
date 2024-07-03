@@ -40,7 +40,7 @@ pager pager pglen "10000"
 </tr>
 {block items}
   <tr class="selected link no-text-select">
-  	<td><input type="checkbox" name="rowdata[][FILE]" checked="checked" class="send-file" value="{FILENAME} {STATUS}"></td>
+  	<td><input type="checkbox" name="rowdata[][FILE]" checked="checked" class="send-file" value="{FILENAME}*{STATUS}"></td>
 	  <td class="filename" onclick="template_form_load_diff('{FILENAME}', '{GET.task}')">{FILENAME}</td>
   	<td><span class="{STATUS}">{STATUS_TEXT}</span></td>
   	<td align="right"></td>
