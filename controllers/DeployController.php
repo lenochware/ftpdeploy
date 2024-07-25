@@ -94,6 +94,9 @@ function previewAction($task)
   if ($datasource['scheme'] =='ftps') {
     $grid->values['FTPS'] = 'ftps';
   }
+  elseif ($datasource['scheme'] =='sftp') {
+    $grid->values['SFTP'] = 'sftp';
+  }
 
   $grid->values['REMOTEDIR'] = $datasource['path'];
 
