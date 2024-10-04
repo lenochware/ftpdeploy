@@ -2,6 +2,7 @@
 
 require_once "FtpDriver.php";
 require_once "SftpDriver.php";
+require_once "LocalDriver.php";
 
 /**
  * Copy files from local directory to remote (ftp).
@@ -40,9 +41,9 @@ class FileSync
 				$this->remote = new SftpDriver($datasource);
 				break;
 
-			/*case 'file':
+			case 'local':
 				$this->remote = new LocalDriver($datasource);
-				break;*/
+				break;
 			
 			default:
 				throw new Exception("Unknown datasource type '$uri'.");

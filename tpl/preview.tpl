@@ -7,6 +7,7 @@ input COMMENT size "100"
 input PASSWORD password
 string HOST
 string FTPS
+string SFTP
 string TOTAL
 string REMOTEDIR
 string FILENAME
@@ -59,7 +60,7 @@ Celkem {TOTAL} souborů.
 <table class="form">
 <tr>
 	<td>Server:</td>
-	<td><i class="fa fa-desktop"></i> {if FTPS}<b style="color:green">ftps</b> {/if}{HOST}</td>
+	<td><i class="fa fa-desktop"></i> {if FTPS}<b style="color:green">ftps</b> {/if}{if SFTP}<b style="color:darkgreen">sftp</b> {/if}{HOST}</td>
 </tr>
 <tr>
 	<td>Adresář:</td>
