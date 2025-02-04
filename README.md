@@ -1,33 +1,30 @@
 # Ftp-Deploy
 Deploy your project on the production server, using ftp.
 
-See the differences on your development server and upload
-changes to the production with one click.
+See the differences between development and production server and upload
+changes with one click.
 
 ### Features
 
-* You have preview of modified files and can choose which files
- do you want upload.
-* Each deploy is stored in the log file alongside with your comment.
-* It can be extended with another remote drivers providing 
-for example SFTP access.
+* Preview of modified files, select which files do you want upload
+* Deploy log with your comment
+* Support deploy over ftp, sftp, ftps and on local filesystem
 * You can specify include/exclude files pattern in configuration
 
 ### Example of configuration file `config/myproject.php`
 
 ```php
-return array(
+return [
 	'local' => '/local/path/to/files',
 	'remote' => 'ftp://user:password@ftp.host.com/path/to/files',
 	'password' => 'your-login',
 	'charset' => 'source-code-charset' /*optional*/
-	'exclude' => array(
-		'*/.git/*', 
-		'*/.*', 
+	'exclude' => [
+		'~/.git',
+		'~/temp',
 		'*.bak',
-		'*/temp/*',
-	),
-);
+	],
+];
 ```
 
 ### Installation
@@ -39,4 +36,4 @@ return array(
 
 ### Requirements
 
-* php 5.6
+* php 7.0
