@@ -8,7 +8,7 @@ changes with one click.
 
 * Preview of modified files, select which files do you want upload
 * Deploy log with your comment
-* Support deploy over ftp, sftp, ftps and on local filesystem
+* Support deploy over ftp, sftp, ftps and local filesystem
 * You can specify include/exclude files pattern in configuration
 
 ### Example of configuration file `config/myproject.php`
@@ -33,7 +33,7 @@ Install it using composer:
 
 	composer create-project lenochware/ftpdeploy
 
-or download from github at your development server
+or download from github to your development server
 
 * Create file config/your-project.php (see example above)
 * Directory ftp-deploy/data must be writeable
