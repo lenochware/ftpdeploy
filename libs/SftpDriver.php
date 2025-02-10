@@ -66,9 +66,13 @@ class SftpDriver
 	}
 
    
-  public function getFile($filePath)
-  {
-		$stream = fopen('ssh2.sftp://' . $this->sftp . $this->rootDir.'/'.$filePath, 'r');
+	public function getFile($filePath)
+	{
+		$uri = 'ssh2.sftp://' . $this->sftp . $this->rootDir.'/'.$filePath;
+
+		if (!file_exists($uri)) return '';
+
+		$stream = fopen($uri, 'r');
 		if (!$stream) return '';
 		$data = stream_get_contents($stream);
 		fclose($stream);

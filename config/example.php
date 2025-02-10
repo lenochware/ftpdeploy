@@ -1,16 +1,15 @@
 <?php
 
-return array(
+return [
 	'local' => '../project-directory',
 	'remote' => 'ftp://user:password@ftp.example.com/www/project',
-	'password' => 'test',
-	'exclude' => array(
-		'*/.git/*', 
+	'password' => 'choose password',
+	'exclude' => [
+		'~/.git', 
+		'~/temp',
 		'*/.*', 
-		'*.sql',
 		'*.bak',
-		'*/temp/*',
-	),
-);
+	],
+];
 
 ?>

@@ -29,7 +29,12 @@ return [
 
 ### Installation
 
-* Copy ftp-deploy somewhere at your development server
+Install it using composer:
+
+	composer create-project lenochware/ftpdeploy
+
+or download from github at your development server
+
 * Create file config/your-project.php (see example above)
 * Directory ftp-deploy/data must be writeable
 * Run ftp-deploy

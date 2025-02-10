@@ -1,0 +1,18 @@
+{
+	"name": "lenochware/ftpdeploy",
+	"description": "pclib deploy tool",
+	"type": "project",
+	"keywords": ["pclib", "deploy", "tool"],
+	"homepage": "http://pclib.brambor.net",
+	"license": ["MIT"],
+	"authors": [
+		{
+			"name": "lenochware",
+			"email": "lenochware@gmail.com"
+		}
+	],
+	"require": {
+		"php": ">=7.0.0",
+		"lenochware/pclib": ">=2.9.0"
+	}
+}
