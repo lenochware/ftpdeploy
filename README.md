@@ -1,15 +1,15 @@
 # Ftp-Deploy
-Deploy your project on the production server, using ftp.
+Deploy your project on the production server, using FTP (SFTP, FTPS).
 
-See the differences between development and production server and upload
+Show differences between development and production server and upload
 changes with one click.
 
 ### Features
 
-* Preview of modified files, select which files do you want upload
-* Deploy log with your comment
-* Support deploy over ftp, sftp, ftps and local filesystem
-* You can specify include/exclude files pattern in configuration
+* Preview of changes (diff between deployment and production version)
+* Choose files to deploy or deploy everything
+* Deployment over ftp, sftp, ftps protocols or to local filesystem
+* You can include/exclude files for deployment in your project
 
 ### Example of configuration file `config/myproject.php`
 
@@ -18,9 +18,9 @@ return [
 	'local' => '/local/path/to/files',
 	'remote' => 'ftp://user:password@ftp.host.com/path/to/files',
 	'password' => 'your-login',
-	'charset' => 'source-code-charset' /*optional*/
+	'charset' => 'source-code-charset' /* optional */
 	'exclude' => [
-		'~/.git',
+		'~/.git',     /* ~ is project directory */
 		'~/temp',
 		'*.bak',
 	],
@@ -33,9 +33,9 @@ Install it using composer:
 
 	composer create-project lenochware/ftpdeploy
 
-or download from github to your development server
+or download from github
 
-* Create file config/your-project.php (see example above)
+* Create file ftp-deploy/config/your-project.php (see example above)
 * Directory ftp-deploy/data must be writeable
 * Run ftp-deploy
 
