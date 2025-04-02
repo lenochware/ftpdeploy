@@ -46,6 +46,7 @@ class LocalDriver
 
   public function getFile($fileName)
   {
+  	if (!file_exists($this->rootDir.'/'.$fileName)) return '';
     return file_get_contents($this->rootDir.'/'.$fileName);
   }	
 
