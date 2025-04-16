@@ -38,6 +38,17 @@ function scrollDiv(e)
       if ($scrollList.index >= $scrollList.length) $scrollList.index = 0;
       e.preventDefault();
     break;
+
+    // "s"
+    case 83:
+      $('table.diff tr').not(':has(td.diffInserted, td.diffDeleted, td.diffBlank)').toggle(isDiffShort);
+      isDiffShort = !isDiffShort;
+    break;
+
+    // Esc
+    case 27:
+      modal_close();
+    break;
   }
 
   let scrollTo = $scrollList.members.eq(i);
@@ -45,7 +56,7 @@ function scrollDiv(e)
   //container.scrollTop(scrollTo.offset().top - container.offset().top + container.scrollTop() ) ;
 
   container.animate({
-    scrollTop: scrollTo.offset().top - container.offset().top + container.scrollTop()
+    scrollTop: scrollTo.offset().top - 20 - container.offset().top + container.scrollTop()
   }, 150);
 
 }
@@ -55,6 +66,8 @@ function scrollDiv(e)
 function initScroll()
 {
   let members = $('.diffInserted,.diffDeleted');
+
+  isDiffShort = false;
 
   $scrollList = {
     members: members,

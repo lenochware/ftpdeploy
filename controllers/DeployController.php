@@ -75,6 +75,8 @@ function previewAction($task)
     $this->app->redirect('deploy/init/task:'.$task);
   }
 
+  $this->app->layout->values['TITLE'] = $task;
+
   $config = $this->getConfig($task);
   $fs = new FileSync;
   $files = $fs->getList($config['local'], $config);
@@ -362,7 +364,7 @@ public function diffAction($file, $repository)
 
   }
 
-  return '<h2>' . $file . '</h2><div id="navig-links"></div><hr>' . Diff::toTable(Diff::compare($from_file, $to_file));
+  return '<h2 style="padding-left:1em;position: sticky;top: 0;background-color:white;width:auto">' . $file . '</h2><hr>' . Diff::toTable(Diff::compare($from_file, $to_file));
 }
 
 }
