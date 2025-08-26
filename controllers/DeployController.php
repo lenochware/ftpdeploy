@@ -90,6 +90,10 @@ function previewAction($task)
   $grid->values['TASK'] = $task;
   $grid->values['TOTAL'] = count($data);
 
+  if (isset($config['color'])) {
+    $grid->values['COLOR'] = $config['color'];
+  }
+
   $datasource = parse_url($config['remote']) + ['host' => '', 'scheme' => '', 'path' => ''];
   $grid->values['HOST'] = $datasource['host'];
 
@@ -364,7 +368,11 @@ public function diffAction($file, $repository)
 
   }
 
-  return '<h2 style="padding-left:1em;position: sticky;top: 0;background-color:white;width:auto">' . $file . '</h2><hr>' . Diff::toTable(Diff::compare($from_file, $to_file));
+  $t = new PCTpl('tpl/diff.tpl');
+  $t->values['TITLE'] = $file;
+  $t->values['BODY'] = Diff::toTable(Diff::compare($from_file, $to_file));
+
+  return $t;
 }
 
 }

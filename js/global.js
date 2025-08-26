@@ -15,6 +15,11 @@ function modal_close() {
     $("#overlay").remove();
 }
 
+function init_global()
+{
+    $('.message').click(function() { $(this).hide(); });
+}
+
 function scrollDiv(e)
 {
   let container = $('#modal1');
@@ -56,7 +61,7 @@ function scrollDiv(e)
   //container.scrollTop(scrollTo.offset().top - container.offset().top + container.scrollTop() ) ;
 
   container.animate({
-    scrollTop: scrollTo.offset().top - 20 - container.offset().top + container.scrollTop()
+    scrollTop: scrollTo.offset().top - 70 - container.offset().top + container.scrollTop()
   }, 150);
 
 }

@@ -59,7 +59,7 @@ Celkem {TOTAL} souborů.
 <br>
 <table class="form">
 <tr>
-	<td>Server:</td>
+	<td>{if COLOR}<i class="fa fa-circle" style="color:{COLOR}"></i> {/if}Server:</td>
 	<td><i class="fa fa-desktop"></i> {if FTPS}<b style="color:green">ftps</b> {/if}{if SFTP}<b style="color:darkgreen">sftp</b> {/if}{HOST}</td>
 </tr>
 <tr>

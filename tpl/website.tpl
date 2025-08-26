@@ -11,7 +11,7 @@ navig NAVIG
 <html>
 <head>
   <meta charset="utf-8">
-  <title>ftp-deploy{if TITLE} | {TITLE}{/if}</title>
+  <title>{if TITLE}{TITLE} | {/if}ftp-deploy</title>
   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.5.0/css/font-awesome.min.css">
   {HEAD}
 </head>
@@ -27,5 +27,8 @@ navig NAVIG
 {PRECONTENT}{CONTENT}
 </div>
 <div class="site-footer"></div>
+<script>
+	$(document).ready(init_global);
+</script>
 </body>
 </html>
